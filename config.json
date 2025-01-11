@@ -1,0 +1,36 @@
+{
+    "interface": {
+        "dark_mode": true,
+        "window_size": {
+            "width": 800,
+            "height": 600
+        },
+        "theme": {
+            "dark": {
+                "background": "#2c2c2c",
+                "text": "#ffffff",
+                "primary": "#3498db",
+                "secondary": "#2ecc71",
+                "warning": "#f1c40f",
+                "error": "#e74c3c"
+            }
+        }
+    },
+    "backup": {
+        "chunk_size": 1048576,
+        "verify_after_copy": true,
+        "auto_continue_on_error": false,
+        "exclude_patterns": [
+            "*.tmp",
+            "~*",
+            "Thumbs.db",
+            ".DS_Store"
+        ]
+    },
+    "logging": {
+        "directory": "logs",
+        "max_size": 10485760,
+        "backup_count": 5,
+        "level": "INFO"
+    }
+}

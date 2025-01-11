@@ -1,0 +1,8 @@
+# PyQt6 is used for creating graphical user interfaces (GUIs) in Python applications
+PyQt6
+
+# psutil is used for system and process utilities (disk usage, I/O stats, CPU info)
+psutil
+
+# humanize makes numbers and dates more readable (e.g., converts bytes to MB/GB)
+humanize

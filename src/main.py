@@ -11,7 +11,7 @@ from .utils.config import load_config
 def main():
     try:
         # Load configuration
-        config = load_config()
+        config, config_path = load_config()
         
         # Setup logger
         log_dir = Path(config.get('logging', {}).get('directory', 'logs'))
@@ -30,7 +30,7 @@ def main():
             app.setWindowIcon(QIcon(str(icon_path)))
         
         # Create and show main window
-        window = MainWindow(config)
+        window = MainWindow(config, config_path)
         window.show()
         
         # Start application event loop

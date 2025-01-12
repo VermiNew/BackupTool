@@ -1,37 +1,61 @@
 import os
 import logging
 from pathlib import Path
-from typing import Dict, Tuple, Callable
+from typing import Dict, Callable, List, Optional
 
 logger = logging.getLogger(__name__)
 
 class FileAnalyzer:
-    """Analyzes files and directories for backup purposes."""
+    """Analyzes files and directories for backup."""
     
     @staticmethod
-    def get_files_info(path: Path, progress_callback: Callable = None) -> Dict:
-        """Get information about all files in the directory."""
+    def get_files_info(
+        path: Path, 
+        progress_callback: Optional[Callable] = None,
+        exclude_patterns: Optional[List[str]] = None
+    ) -> Dict:
+        """Get information about files in directory."""
         files_info = {}
         file_count = 0
-        
-        # First count total files
-        total_files = sum(1 for _ in path.rglob('*') if Path(_).is_file())
-        
-        for file_path in path.rglob('*'):
-            if file_path.is_file():
-                file_count += 1
-                # Emit current path being scanned
-                if progress_callback:
-                    rel_path = file_path.relative_to(path)
-                    progress_callback(f"Scanning: {rel_path} ({file_count}/{total_files} files)")
-                
+        exclude_patterns = exclude_patterns or []
+
+        # Helper function to check exclusions
+        def is_excluded(file_path: Path) -> bool:
+            try:
+                # Check relative path from base directory
                 rel_path = file_path.relative_to(path)
-                stats = file_path.stat()
-                files_info[str(rel_path)] = {
-                    'size': stats.st_size,
-                    'mtime': stats.st_mtime,
-                }
-                
+                # Check each exclusion pattern
+                return any(Path(str(rel_path)).match(pattern) for pattern in exclude_patterns)
+            except ValueError:
+                return False
+
+        # Count files considering exclusions
+        total_files = sum(
+            1 for f in path.rglob('*') 
+            if f.is_file() and not is_excluded(f)
+        )
+
+        # Iterate through files
+        for file_path in path.rglob('*'):
+            if not file_path.is_file():
+                continue
+
+            # Check if file should be excluded
+            if is_excluded(file_path):
+                continue
+
+            file_count += 1
+            if progress_callback:
+                rel_path = file_path.relative_to(path)
+                progress_callback(f"Scanning: {rel_path} ({file_count}/{total_files} files)")
+
+            rel_path = file_path.relative_to(path)
+            stats = file_path.stat()
+            files_info[str(rel_path)] = {
+                'size': stats.st_size,
+                'mtime': stats.st_mtime,
+            }
+
         return files_info
 
     @staticmethod
@@ -66,4 +90,4 @@ class FileAnalyzer:
             if rel_path not in source_files:
                 differences['to_delete'].append(rel_path)
 
-        return differences 
+        return differences

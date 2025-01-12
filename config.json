@@ -21,10 +21,7 @@
         "verify_after_copy": true,
         "auto_continue_on_error": false,
         "exclude_patterns": [
-            "*.tmp",
-            "~*",
-            "Thumbs.db",
-            ".DS_Store"
+            "Games\\*"
         ]
     },
     "logging": {
@@ -32,5 +29,6 @@
         "max_size": 10485760,
         "backup_count": 5,
         "level": "INFO"
-    }
+    },
+    "auto_mode": false
 }

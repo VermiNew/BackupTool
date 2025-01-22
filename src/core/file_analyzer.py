@@ -2,6 +2,7 @@ import os
 import logging
 from pathlib import Path
 from typing import Dict, Callable, List, Optional
+import fnmatch
 
 logger = logging.getLogger(__name__)
 
@@ -22,39 +23,64 @@ class FileAnalyzer:
         # Helper function to check exclusions
         def is_excluded(file_path: Path) -> bool:
             try:
-                # Check relative path from base directory
-                rel_path = file_path.relative_to(path)
-                # Check each exclusion pattern
-                return any(Path(str(rel_path)).match(pattern) for pattern in exclude_patterns)
+                # Get relative path from base directory
+                rel_path = str(file_path.relative_to(path))
+                rel_path_parts = Path(rel_path).parts
+                
+                for pattern in exclude_patterns:
+                    pattern = pattern.strip()
+                    if not pattern:
+                        continue
+                        
+                    # Handle directory patterns (ending with /)
+                    if pattern.endswith('/'):
+                        dir_pattern = pattern.rstrip('/')
+                        if any(part == dir_pattern for part in rel_path_parts):
+                            return True
+                    # Handle file patterns
+                    else:
+                        # Check if any part of the path matches the pattern
+                        if any(fnmatch.fnmatch(part, pattern) for part in rel_path_parts):
+                            return True
+                return False
             except ValueError:
                 return False
 
-        # Count files considering exclusions
-        total_files = sum(
-            1 for f in path.rglob('*') 
-            if f.is_file() and not is_excluded(f)
-        )
+        try:
+            # Count files considering exclusions
+            total_files = sum(
+                1 for f in path.rglob('*') 
+                if f.is_file() and not is_excluded(f)
+            )
 
-        # Iterate through files
-        for file_path in path.rglob('*'):
-            if not file_path.is_file():
-                continue
+            # Iterate through files
+            for file_path in path.rglob('*'):
+                if not file_path.is_file():
+                    continue
 
-            # Check if file should be excluded
-            if is_excluded(file_path):
-                continue
+                # Check if file should be excluded
+                if is_excluded(file_path):
+                    continue
 
-            file_count += 1
-            if progress_callback:
-                rel_path = file_path.relative_to(path)
-                progress_callback(f"Scanning: {rel_path} ({file_count}/{total_files} files)")
+                file_count += 1
+                if progress_callback:
+                    rel_path = file_path.relative_to(path)
+                    progress_callback(f"Scanning: {rel_path} ({file_count}/{total_files} files)")
 
-            rel_path = file_path.relative_to(path)
-            stats = file_path.stat()
-            files_info[str(rel_path)] = {
-                'size': stats.st_size,
-                'mtime': stats.st_mtime,
-            }
+                try:
+                    rel_path = str(file_path.relative_to(path))
+                    stats = file_path.stat()
+                    files_info[rel_path] = {
+                        'size': stats.st_size,
+                        'mtime': stats.st_mtime,
+                    }
+                except (OSError, ValueError) as e:
+                    logger.warning(f"Failed to get info for {file_path}: {e}")
+                    continue
+
+        except Exception as e:
+            logger.error(f"Error scanning directory {path}: {e}")
+            raise
 
         return files_info
 

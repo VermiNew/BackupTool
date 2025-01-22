@@ -45,8 +45,9 @@ htmlcov/
 .tox/
 
 # Project specific
-config.local.json
+config.json
 backup_history/
 temp/
 *.bak
 *.tmp
+TODO.md

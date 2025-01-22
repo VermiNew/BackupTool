@@ -16,10 +16,10 @@ class PathVerificationDialog(QDialog):
     """Dialog for verifying backup paths and operations."""
     
     OPERATIONS = {
-        'copy': {'text': 'Copy', 'color': QColor('#4CAF50')},  # Green
-        'update': {'text': 'Update', 'color': QColor('#2196F3')},  # Blue
-        'move': {'text': 'Move', 'color': QColor('#FF9800')},  # Orange
-        'delete': {'text': 'Delete', 'color': QColor('#F44336')}  # Red
+        'copy': {'text': 'Copy', 'color': QColor('#4CAF50')},       # Green
+        'update': {'text': 'Update', 'color': QColor('#2196F3')},   # Blue
+        'move': {'text': 'Move', 'color': QColor('#FF9800')},       # Orange
+        'delete': {'text': 'Delete', 'color': QColor('#F44336')}    # Red
     }
     
     def __init__(self, differences: Dict, parent=None):
@@ -185,13 +185,19 @@ class PathVerificationDialog(QDialog):
                 for path in self.differences[diff_key]:
                     try:
                         file_info = get_file_info(path)
-                        size_str = format_size(file_info['size']) if file_info else "Unknown"
+                        if file_info:
+                            size = file_info['size'] if not file_info['is_dir'] else 0
+                            size_str = format_size(size)
+                        else:
+                            size = 0
+                            size_str = format_size(0)
+                            
                         status = self.get_file_status(path, op_key)
                         
                         self.filtered_items.append({
                             'operation': op_key,
                             'path': path,
-                            'size': file_info['size'] if file_info else 0,
+                            'size': size,
                             'size_str': size_str,
                             'status': status
                         })

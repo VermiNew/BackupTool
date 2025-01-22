@@ -6,7 +6,7 @@ import json
 
 from .file_analyzer import FileAnalyzer
 from .file_handler import FileHandler, FileOperationError
-from ..utils.helpers import get_drive_info, get_free_space, format_size
+from ..utils.helpers import get_free_space, format_size
 
 logger = logging.getLogger(__name__)
 
@@ -172,8 +172,7 @@ class BackupManager:
 
             # Copy and update files
             total_copied = 0
-            _, chunk_size = get_drive_info(self.dest_path)
-            self.handler.CHUNK_SIZE = chunk_size
+            self.handler.CHUNK_SIZE = 1024 * 1024  # Use 1MB fixed chunk size
             
             for rel_path in differences['to_copy'] + differences['to_update']:
                 if not self._running:

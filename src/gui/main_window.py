@@ -12,7 +12,7 @@ import json
 import math
 
 from ..core.backup_manager import BackupManager
-from ..utils.helpers import get_drive_info, format_size
+from ..utils.helpers import format_size
 from .widgets import AnimatedProgressBar
 from .dialogs import PathVerificationDialog
 
@@ -501,12 +501,6 @@ class MainWindow(QMainWindow):
         self.buffer_size.currentIndexChanged.connect(self._buffer_size_changed)
         buffer_layout.addWidget(self.buffer_size)
         
-        # Add auto-detect button
-        self.auto_detect_buffer = QPushButton("Auto-detect")
-        self.auto_detect_buffer.setToolTip("Detect optimal buffer size based on source drive type")
-        self.auto_detect_buffer.clicked.connect(self._auto_detect_buffer_size)
-        buffer_layout.addWidget(self.auto_detect_buffer)
-        
         # Add exclusion patterns
         exclude_layout = QHBoxLayout()
         self.exclude_patterns = QLineEdit()
@@ -529,35 +523,6 @@ class MainWindow(QMainWindow):
         new_size = self.buffer_size.currentData()
         self.config['backup']['chunk_size'] = new_size
         self.save_settings()
-        
-    def _auto_detect_buffer_size(self):
-        """Auto-detect optimal buffer size based on source drive type."""
-        source_path = self.source_path.text().strip()
-        if not source_path:
-            QMessageBox.warning(self, "Warning", "Please select source path first")
-            return
-            
-        try:
-            drive_type, optimal_buffer = get_drive_info(Path(source_path))
-            
-            # Save optimal buffer to config
-            self.config['backup']['optimal_buffer'] = optimal_buffer
-            self.save_settings()
-            
-            # Find or add optimal buffer size option
-            index = self.buffer_size.findData(optimal_buffer)
-            if index >= 0:
-                self.buffer_size.setCurrentIndex(index)
-            else:
-                optimal_label = f"{format_size(optimal_buffer)} (recommended for detected {drive_type.upper()} drive)"
-                self.buffer_size.addItem(optimal_label, optimal_buffer)
-                self.buffer_size.setCurrentIndex(self.buffer_size.count() - 1)
-                
-            self.buffer_size.setToolTip(f"Using recommended buffer size for detected {drive_type.upper()} drive")
-            
-        except Exception as e:
-            logger.warning(f"Failed to auto-detect buffer size: {e}")
-            QMessageBox.warning(self, "Warning", "Failed to auto-detect optimal buffer size. Using current setting.")
         
     def _setup_progress_group(self, layout: QVBoxLayout):
         """Setup the progress group box."""

@@ -7,7 +7,7 @@ A Python-based backup application with GUI that intelligently copies files by co
 - GUI interface built with PyQt6
 - Smart backup that only copies changed files
 - Progress bar with ETA and speed information
-- File exclusion patterns (e.g., *.tmp, *.log)
+- File exclusion patterns (e.g., *.tmp,*.log)
 - Detailed backup reports in JSON format
 - Error handling with user prompts
 - Logging functionality
@@ -18,21 +18,39 @@ A Python-based backup application with GUI that intelligently copies files by co
 
 - Python 3.8 or higher
 - Dependencies listed in `requirements.txt`
+- GUI system requirements for PyQt6
 
 ## Installation
 
 1. Clone this repository
-2. Install the required packages:
-```bash
-pip install -r requirements.txt
-```
+2. Run the setup script:
+   - On Linux/macOS:
+
+     ```bash
+     chmod +x setup.sh
+     ./setup.sh
+     ```
+
+   - On Windows:
+
+     ```cmd
+     setup.bat
+     ```
 
 ## Usage
 
 1. Run the application:
-```bash
-python main.py
-```
+   - On Linux/macOS:
+
+     ```bash
+     ./run.sh
+     ```
+
+   - On Windows:
+
+     ```cmd
+     run.bat
+     ```
 
 2. Select source and destination directories using the GUI
 3. (Optional) Add file exclusion patterns in the Options section
@@ -67,6 +85,16 @@ python main.py
 
 ## Logging
 
-- Log file location: `backup_app.log`
+- Log files are stored in the `logs/` directory
+- Default log file: `logs/backup_app.log`
 - Maximum log file size: 100 MB
 - Logs include timestamps and error details
+- Old logs are automatically rotated
+
+## Resources
+
+The application includes:
+
+- Application icon (available in PNG and SVG formats)
+- Default configuration templates
+- All required assets are included in the `src/resources/` directory

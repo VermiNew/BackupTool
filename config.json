@@ -10,23 +10,68 @@
                 "background": "#2c2c2c",
                 "text": "#ffffff",
                 "primary": "#3498db",
-                "secondary": "#2ecc71",
+                "secondary": "#2980b9",
                 "warning": "#f1c40f",
                 "error": "#e74c3c"
+            },
+            "light": {
+                "background": "#ffffff",
+                "text": "#2c2c2c",
+                "primary": "#3498db",
+                "secondary": "#2980b9"
             }
-        }
+        },
+        "minimize_to_tray": true
     },
     "backup": {
-        "chunk_size": 1048576,
+        "chunk_size": 8388608,
         "verify_after_copy": true,
         "auto_continue_on_error": false,
-        "exclude_patterns": [""]
+        "exclude_patterns": [
+            "Games",
+            "$RECYCLE_BIN"
+        ],
+        "directory": "backups"
     },
     "logging": {
         "directory": "logs",
         "max_size": 10485760,
         "backup_count": 5,
         "level": "INFO"
+    },
+    "tray": {
+        "notifications": {
+            "backup_start": true,
+            "backup_complete": true,
+            "backup_error": true,
+            "minimize_notification": true
+        },
+        "actions": {
+            "minimize_to_tray": true,
+            "close_to_tray": true,
+            "start_minimized": false
+        }
+    },
+    "system": {
+        "memory_limit": 1073741824,
+        "thresholds": {
+            "cpu_percent": 90,
+            "memory_percent": 85,
+            "disk_percent": 90
+        },
+        "cache": {
+            "max_size": 10000,
+            "cleanup_ratio": 0.2
+        },
+        "health_check": {
+            "interval": 60,
+            "enabled": true
+        },
+        "recovery": {
+            "enabled": true,
+            "auto_restore": true,
+            "state_save_interval": 300
+        }
     },
     "auto_mode": false
 }

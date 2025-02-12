@@ -1,20 +1,28 @@
 import logging
 from pathlib import Path
-from typing import Tuple, Dict, Optional, List
+from typing import Tuple, Dict, Optional, List, Any
 from PyQt6.QtWidgets import (
     QMainWindow, QWidget, QVBoxLayout, QHBoxLayout, 
     QPushButton, QLabel, QFileDialog, QMessageBox,
-    QGroupBox, QLineEdit, QCheckBox, QComboBox
+    QGroupBox, QLineEdit, QCheckBox, QComboBox,
+    QSystemTrayIcon, QApplication
 )
-from PyQt6.QtCore import QThread, pyqtSignal
+from PyQt6.QtCore import QThread, pyqtSignal, Qt
 import time
 import json
 import math
+from datetime import datetime
 
 from ..core.backup_manager import BackupManager
 from ..utils.helpers import format_size
+from ..utils.error_handler import ErrorTracker, ConfigurationError
+from ..utils.memory_manager import MemoryManager
+from ..utils.recovery import AutomaticRecovery
+from ..utils.cleanup import CleanupManager
+from ..utils.update_checker import UpdateChecker
 from .widgets import AnimatedProgressBar
 from .dialogs import PathVerificationDialog
+from .tray_manager import TrayManager
 
 logger = logging.getLogger(__name__)
 
@@ -394,13 +402,108 @@ class MainWindow(QMainWindow):
         self.scanning = False
         self.backing_up = False
         self.backup_manager = BackupManager()
+        self.quit_requested = False
         
         # First setup UI to create all fields
         self.setup_ui()
         
+        # Initialize managers
+        self.setup_error_handling()
+        self.setup_memory_management()
+        self.setup_recovery()
+        self.setup_cleanup()
+        self.setup_update_checker()
+        
+        # Initialize tray last, after all UI elements are created
+        self.setup_tray()
+        
         # Then load saved settings into existing fields
         self.load_saved_settings()
         
+        # Check for updates
+        self.check_for_updates()
+        
+    def setup_error_handling(self):
+        """Initialize error handling system."""
+        log_dir = Path(self.config.get('logging', {}).get('directory', 'logs'))
+        self.error_tracker = ErrorTracker(log_dir)
+        
+    def setup_memory_management(self):
+        """Initialize memory management system."""
+        memory_limit = self.config.get('system', {}).get('memory_limit', None)
+        self.memory_manager = MemoryManager(memory_limit)
+        
+        # Register caches if needed
+        self.memory_manager.register_cache('backup_cache', {}, 1000)
+        
+    def setup_recovery(self):
+        """Initialize recovery system."""
+        backup_dir = Path(self.config.get('backup', {}).get('directory', 'backups'))
+        self.recovery = AutomaticRecovery(backup_dir)
+        
+        # Start health monitoring
+        self.recovery.start_monitoring(self.handle_health_warning)
+        
+        # Setup signal handlers
+        self.recovery.setup_signal_handlers()
+        
+        # Try to load previous state
+        self.load_previous_state()
+        
+    def handle_health_warning(self, warning: str):
+        """Handle system health warnings."""
+        self.tray_manager.set_state('warning', warning)
+        QMessageBox.warning(
+            self,
+            "System Warning",
+            warning,
+            QMessageBox.StandardButton.Ok
+        )
+        
+    def load_previous_state(self):
+        """Try to load and restore previous backup state."""
+        state = self.recovery.crash_recovery.load_state()
+        if state:
+            reply = QMessageBox.question(
+                self,
+                'Recover Previous Session',
+                'A previous backup session was interrupted. Would you like to restore it?',
+                QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No,
+                QMessageBox.StandardButton.Yes
+            )
+            if reply == QMessageBox.StandardButton.Yes:
+                # Restore previous state
+                if 'source_path' in state:
+                    self.source_path.setText(state['source_path'])
+                if 'dest_path' in state:
+                    self.dest_path.setText(state['dest_path'])
+                # Add more state restoration as needed
+                
+    def setup_tray(self):
+        """Initialize system tray icon."""
+        if not QSystemTrayIcon.isSystemTrayAvailable():
+            logger.warning("System tray is not available")
+            return
+            
+        self.tray_manager = TrayManager(self)
+        
+        # Connect tray signals
+        self.tray_manager.show_window.connect(self.show_and_activate)
+        self.tray_manager.start_backup.connect(self.start_backup_from_tray)
+        self.tray_manager.stop_backup.connect(self.cancel_backup)
+        self.tray_manager.quit_app.connect(self.quit_application)
+        
+    def show_and_activate(self):
+        """Show and activate the window."""
+        self.show()
+        self.activateWindow()
+        self.raise_()
+        
+    def start_backup_from_tray(self):
+        """Start backup from tray without showing window."""
+        if not self.scanning and not self.backing_up:
+            self.start_backup()
+            
     def setup_ui(self):
         """Initialize and setup the user interface."""
         self.setWindowTitle("Backup Tool")
@@ -644,46 +747,55 @@ class MainWindow(QMainWindow):
             self.save_settings()
                 
     def start_backup(self):
-        """Start the backup process."""
+        """Start the backup process with resource checks."""
         if self.scanning or self.backing_up:
+            return
+            
+        # Check system resources before starting
+        if not self.check_system_resources():
             return
             
         source = self.source_path.text().strip()
         dest = self.dest_path.text().strip()
         
         if not source or not dest:
-            QMessageBox.warning(self, "Error", PATH_SELECT_ERROR)
+            self.handle_error(
+                ConfigurationError("Please select both paths"),
+                {'source': source, 'dest': dest}
+            )
             return
             
-        # Configure backup manager
-        self.backup_manager.source_path = source
-        self.backup_manager.dest_path = dest
-        
-        # Set exclude patterns
-        patterns = [p.strip() for p in self.exclude_patterns.text().split(',') if p.strip()]
-        self.backup_manager.set_exclude_patterns(patterns)
-        
-        # Disable UI during scan
-        self.scanning = True
-        self.update_ui_state()
-        self.status_label.setText(f"{SCANNING_MSG}...")
-        self.progress_bar.setValue(0)
-        
-        # Start scan thread
-        self.scan_thread = ScanThread(self.backup_manager, source, dest)
-        self.scan_thread.status.connect(self.update_status)
-        self.scan_thread.current_file.connect(self.update_current_file)
-        self.scan_thread.finished.connect(self.scan_finished)
-        self.scan_thread.start()
+        try:
+            # Configure backup manager
+            self.backup_manager.source_path = source
+            self.backup_manager.dest_path = dest
+            
+            # Set exclude patterns
+            patterns = [p.strip() for p in self.exclude_patterns.text().split(',') if p.strip()]
+            self.backup_manager.set_exclude_patterns(patterns)
+            
+            # Disable UI during scan
+            self.scanning = True
+            self.update_ui_state()
+            self.status_label.setText(f"{SCANNING_MSG}...")
+            self.progress_bar.setValue(0)
+            
+            # Start scan thread
+            self.scan_thread = ScanThread(self.backup_manager, source, dest)
+            self.scan_thread.status.connect(self.update_status)
+            self.scan_thread.current_file.connect(self.update_current_file)
+            self.scan_thread.finished.connect(self.scan_finished)
+            self.scan_thread.start()
+            
+        except Exception as e:
+            self.handle_error(e, {
+                'source': source,
+                'dest': dest,
+                'patterns': patterns
+            })
         
     def scan_finished(self, success: bool, message: str, differences: Dict):
-        """Handle scan completion.
-        
-        Args:
-            success: Whether the scan completed successfully
-            message: Status message from the scan
-            differences: Dictionary containing files to process
-        """
+        """Handle scan completion."""
         self.scanning = False
         
         if not success:
@@ -734,7 +846,6 @@ class MainWindow(QMainWindow):
             else:
                 self.backup_manager.stop()
                 self.backup_thread.wait()
-                self.backing_up = False
             
             self.update_ui_state()
             self.status_label.setText(BACKUP_CANCELLED_MSG)
@@ -748,28 +859,40 @@ class MainWindow(QMainWindow):
         self.progress_bar.setValue(int(value))
         
     def update_status(self, message: str):
-        """Update status label text.
-        
-        Args:
-            message: Status message to display
-        """
+        """Update status label text and tray tooltip."""
         self.status_label.setText(message)
         
-    def backup_finished(self, success: bool, message: str):
-        """Handle backup completion.
-        
-        Args:
-            success: Whether the backup completed successfully
-            message: Status message from the backup
-        """
+        # Update tray state based on message
+        if self.backing_up:
+            self.tray_manager.set_state('backup', message)
+        elif "error" in message.lower():
+            self.tray_manager.set_state('error', message)
+        elif "warning" in message.lower():
+            self.tray_manager.set_state('warning', message)
+        else:
+            self.tray_manager.set_state('waiting', message)
+            
+    def backup_finished(self, success: bool, message: str, stats: Dict = None):
+        """Handle backup completion."""
         self.backing_up = False
         self.update_ui_state()
         
-        if success:
-            QMessageBox.information(self, "Success", message)
-        else:
+        if not success:
             QMessageBox.critical(self, "Error", message)
+            return
             
+        if stats and stats.get('errors', 0) > 0:
+            error_msg = f"Backup completed with {stats['errors']} errors"
+            QMessageBox.warning(
+                self,
+                "Backup Warning",
+                error_msg,
+                QMessageBox.StandardButton.Ok
+            )
+            
+        self.status_label.setText(message)
+        self.progress_bar.setValue(100)
+        
         # Save settings after backup completion
         self.save_settings()
             
@@ -787,6 +910,12 @@ class MainWindow(QMainWindow):
         self.buffer_size.setEnabled(enabled)
         self.cancel_button.setEnabled(not enabled)
         
+        # Update tray state
+        if not enabled:
+            self.tray_manager.set_state('backup', "Backup in progress...")
+        else:
+            self.tray_manager.set_state('waiting', READY_MSG)
+            
         # Clear stats when not backing up
         if enabled:
             self.speed_label.setText("")
@@ -855,23 +984,222 @@ class MainWindow(QMainWindow):
     def closeEvent(self, event):
         """Handle application close event."""
         if self.scanning or self.backing_up:
-            reply = QMessageBox.question(
+            # If operation is in progress, show warning
+            warning_msg = (
+                "A file operation is in progress!\n\n"
+                "Please either:\n"
+                "1. Stop the current operation and wait for it to finish\n"
+                "2. Wait for the operation to complete naturally\n"
+                "3. Use SHIFT + ESC for emergency force quit (may corrupt files!)\n\n"
+                "Do you want to stop the current operation?"
+            )
+            
+            reply = QMessageBox.warning(
                 self,
-                'Confirm Exit',
-                EXIT_CONFIRM,
+                'Operation in Progress',
+                warning_msg,
                 QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No,
                 QMessageBox.StandardButton.No
             )
-            if reply == QMessageBox.StandardButton.No:
+            
+            if reply == QMessageBox.StandardButton.Yes:
+                # User chose to stop the operation
+                if self.scanning:
+                    self.scan_thread.terminate()
+                    self.scan_thread.wait()
+                elif self.backing_up:
+                    self.backup_manager.stop()
+                    # Show "waiting for operation to stop" message
+                    please_wait = QMessageBox(
+                        QMessageBox.Icon.Information,
+                        "Please Wait",
+                        "Waiting for the operation to stop safely...",
+                        QMessageBox.StandardButton.NoButton,
+                        self
+                    )
+                    please_wait.show()
+                    # Wait for backup thread to finish
+                    self.backup_thread.wait()
+                    please_wait.close()
+                    
+                # Show final warning
+                final_msg = (
+                    "Operation has been stopped.\n"
+                    "It's now safe to close the application.\n"
+                    "Click OK to close or Cancel to continue working."
+                )
+                final_reply = QMessageBox.information(
+                    self,
+                    'Safe to Close',
+                    final_msg,
+                    QMessageBox.StandardButton.Ok | QMessageBox.StandardButton.Cancel,
+                    QMessageBox.StandardButton.Cancel
+                )
+                
+                if final_reply == QMessageBox.StandardButton.Cancel:
+                    event.ignore()
+                    return
+            else:
+                # User chose not to stop the operation
                 event.ignore()
                 return
-                
-            if self.scanning:
-                self.scan_thread.terminate()
-                self.scan_thread.wait()
-            elif self.backing_up:
-                self.backup_manager.stop()
-                self.backup_thread.wait()
         
+        # If we get here, either no operation was in progress or it was safely stopped
+        
+        # Save current state and settings
         self.save_settings()
-        event.accept()
+        self.save_current_state()
+        
+        # If closing to tray is enabled and it's not a quit action
+        if (self.config.get('tray', {}).get('actions', {}).get('close_to_tray', True) and 
+            not self.quit_requested):
+            self.hide()
+            # Show toast notification that app is minimized to tray
+            self.tray_manager.show_message(
+                "Backup Tool",
+                "Application minimized to system tray.\nDouble-click the tray icon to restore.",
+                QSystemTrayIcon.MessageIcon.Information
+            )
+            event.ignore()
+        else:
+            # Stop recovery monitoring
+            self.recovery.stop_monitoring()
+            
+            # Clean up caches
+            self.memory_manager.clear_all_caches()
+            
+            # Cleanup before exit
+            self.tray_manager.cleanup()
+            self.recovery.crash_recovery.cleanup_state()
+            
+            # Accept the close event
+            event.accept()
+            
+            # Ensure the application quits
+            QApplication.instance().quit()
+
+    def save_current_state(self):
+        """Save current application state for recovery."""
+        if self.backing_up:
+            state = {
+                'source_path': self.source_path.text(),
+                'dest_path': self.dest_path.text(),
+                'progress': self.progress_bar.value(),
+                'status': self.status_label.text(),
+                'timestamp': datetime.now().isoformat()
+            }
+            self.recovery.crash_recovery.save_state(state)
+            
+    def handle_error(self, error: Exception, context: Dict[str, Any] = None):
+        """Handle application errors."""
+        self.error_tracker.handle_error(error, context)
+        self.tray_manager.set_state('error', str(error))
+        QMessageBox.critical(
+            self,
+            "Error",
+            str(error),
+            QMessageBox.StandardButton.Ok
+        )
+        
+    def check_system_resources(self) -> bool:
+        """Check if system resources are sufficient."""
+        # Check memory usage
+        if not self.memory_manager.check_memory():
+            memory_msg = "Memory usage is critical - cannot start backup"
+            self.handle_error(
+                Exception(memory_msg),
+                {'memory_usage': self.memory_manager.get_memory_usage()}
+            )
+            return False
+            
+        # Check system health
+        health_status = self.recovery.health_monitor.check_system_health()
+        if not health_status['is_healthy']:
+            for warning in health_status['warnings']:
+                self.handle_health_warning(warning)
+            return False
+            
+        return True
+        
+    def setup_cleanup(self):
+        """Initialize cleanup manager."""
+        self.cleanup_manager = CleanupManager()
+        
+    def quit_application(self):
+        """Handle application quit from tray menu."""
+        # Set quit flag
+        self.quit_requested = True
+        
+        # Save and cleanup
+        self.save_settings()
+        self.save_current_state()
+        self.recovery.stop_monitoring()
+        self.memory_manager.clear_all_caches()
+        self.recovery.crash_recovery.cleanup_state()
+        
+        # Run cleanup operations
+        self.cleanup_manager.cleanup_all()
+        
+        # Close all windows and quit
+        QApplication.instance().closeAllWindows()
+        QApplication.instance().quit()
+
+    def keyPressEvent(self, event):
+        """Handle key press events."""
+        # Check for Shift + Esc
+        if event.key() == Qt.Key.Key_Escape and event.modifiers() == Qt.KeyboardModifier.ShiftModifier:
+            # Show emergency quit warning if operations are in progress
+            if self.scanning or self.backing_up:
+                warning_msg = (
+                    "WARNING: Emergency Force Quit!\n\n"
+                    "A file operation is in progress!\n"
+                    "Force quitting now may result in:\n"
+                    "- Corrupted files\n"
+                    "- Incomplete backups\n"
+                    "- Lost data\n\n"
+                    "Are you absolutely sure you want to force quit?"
+                )
+                reply = QMessageBox.critical(
+                    self,
+                    'Emergency Force Quit',
+                    warning_msg,
+                    QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No,
+                    QMessageBox.StandardButton.No
+                )
+                if reply == QMessageBox.StandardButton.No:
+                    return
+            else:
+                # Normal force quit confirmation if no operations are in progress
+                reply = QMessageBox.question(
+                    self,
+                    'Force Quit',
+                    'Are you sure you want to force quit the application?',
+                    QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No,
+                    QMessageBox.StandardButton.No
+                )
+                if reply == QMessageBox.StandardButton.No:
+                    return
+                    
+            # Force quit without saving
+            self.tray_manager.cleanup()
+            # Run cleanup even in force quit
+            self.cleanup_manager.cleanup_all()
+            QApplication.instance().quit()
+        else:
+            super().keyPressEvent(event)
+
+    def setup_update_checker(self):
+        """Initialize update checker."""
+        self.update_checker = UpdateChecker()
+        
+    def check_for_updates(self):
+        """Check for application updates."""
+        has_update, message = self.update_checker.check_for_updates()
+        if has_update:
+            self.tray_manager.show_message(
+                "Update Available",
+                message,
+                QSystemTrayIcon.MessageIcon.Information
+            )
+        elif "Git is not available" in message:
+            logger.warning(message)

@@ -6,3 +6,9 @@ psutil
 
 # humanize makes numbers and dates more readable (e.g., converts bytes to MB/GB)
 humanize
+
+# Libraries for SVG to PNG conversion
+svglib
+reportlab
+Pillow  # Python Imaging Library for image processing
+pdf2image  # For converting PDF to images

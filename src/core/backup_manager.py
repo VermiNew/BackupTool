@@ -3,10 +3,12 @@ from pathlib import Path
 from typing import Dict, Tuple, Optional, Callable, List
 from datetime import datetime
 import json
+import sys
 
 from .file_analyzer import FileAnalyzer
 from .file_handler import FileHandler, FileOperationError
 from ..utils.helpers import get_free_space, format_size
+from ..utils.hash_utils import get_file_signature
 
 logger = logging.getLogger(__name__)
 
@@ -117,114 +119,230 @@ class BackupManager:
             logger.error(f"Path analysis failed: {e}")
             return False, f"Path analysis failed: {str(e)}"
             
+    def _compare_files(self, source_file: Path, dest_file: Path) -> Tuple[bool, str]:
+        """Compare two files to determine if they are identical.
+        
+        Performs checks in order of increasing complexity:
+        1. Basic attributes (size, time)
+        2. File permissions
+        3. Content comparison
+        4. System attributes (Windows)
+        
+        Args:
+            source_file: Original file path
+            dest_file: File to compare against
+            
+        Returns:
+            (is_different, reason): Tuple indicating if files differ and why
+        """
+        try:
+            src_stat = source_file.stat()
+            dst_stat = dest_file.stat()
+            
+            if src_stat.st_size != dst_stat.st_size:
+                return True, "Different file size"
+                
+            # Use 2-second tolerance for filesystem differences
+            if abs(src_stat.st_mtime - dst_stat.st_mtime) > 2:
+                return True, "Different modification time"
+                
+            if hasattr(src_stat, 'st_mode'):
+                if src_stat.st_mode != dst_stat.st_mode:
+                    return True, "Different file permissions"
+            
+            # Compare content in chunks to minimize memory usage
+            CHUNK_SIZE = 8192  # 8KB chunks for efficient memory usage
+            with open(source_file, 'rb') as src, open(dest_file, 'rb') as dst:
+                while True:
+                    src_chunk = src.read(CHUNK_SIZE)
+                    dst_chunk = dst.read(CHUNK_SIZE)
+                    
+                    if src_chunk != dst_chunk:
+                        return True, "Different file content"
+                    
+                    if not src_chunk:
+                        break
+            
+            # Check Windows-specific attributes
+            try:
+                # On Windows check attributes like hidden, system, readonly
+                if sys.platform == 'win32':
+                    import win32api
+                    import win32con
+                    src_attrs = win32api.GetFileAttributes(str(source_file))
+                    dst_attrs = win32api.GetFileAttributes(str(dest_file))
+                    
+                    # Check only important attributes (hidden, system, readonly)
+                    important_attrs = (
+                        win32con.FILE_ATTRIBUTE_HIDDEN |
+                        win32con.FILE_ATTRIBUTE_SYSTEM |
+                        win32con.FILE_ATTRIBUTE_READONLY
+                    )
+                    if (src_attrs & important_attrs) != (dst_attrs & important_attrs):
+                        return True, "Different system attributes"
+            except ImportError:
+                # If we don't have access to win32api, skip these tests
+                pass
+                
+            return False, "Files are identical"
+            
+        except Exception as e:
+            logger.error(f"Error comparing files: {e}")
+            return True, f"Comparison error: {str(e)}"
+
     def analyze_differences(self, progress_callback: Callable = None) -> Dict:
-        """Analyze differences between directories."""
-        if progress_callback:
-            progress_callback("Scanning source directory...")
+        """Analyze differences between source and destination directories.
+        
+        Args:
+            progress_callback: Function to report progress
             
-        source_files = self.analyzer.get_files_info(
-            self.source_path,
-            progress_callback,
-            self.exclude_patterns
-        )
+        Returns:
+            Dictionary with lists of files to copy, update, and delete
+        """
+        differences = {
+            'to_copy': [],
+            'to_update': [],
+            'to_delete': []
+        }
         
         if progress_callback:
-            progress_callback("Scanning destination directory...")
-            
-        dest_files = self.analyzer.get_files_info(
-            self.dest_path,
-            progress_callback,
-            self.exclude_patterns
-        ) if self.dest_path.exists() else {}
+            progress_callback("Analyzing files...")
         
-        if progress_callback:
-            progress_callback("Analyzing differences...")
+        # Process source directory
+        total_files = 0
+        for source_file in self.source_path.rglob('*'):
+            if not self._running:
+                break
+                
+            # Skip directories and excluded files
+            if not source_file.is_file() or any(source_file.match(p) for p in self.exclude_patterns):
+                continue
+                
+            total_files += 1
+            if total_files % 100 == 0 and progress_callback:
+                progress_callback(f"Analyzed {total_files} files...")
+                
+            # Calculate relative path
+            rel_path = source_file.relative_to(self.source_path)
+            dest_file = self.dest_path / rel_path
             
-        return self.analyzer.analyze_differences(source_files, dest_files)
+            # Check if file exists in destination
+            if not dest_file.exists():
+                differences['to_copy'].append(str(rel_path))
+            else:
+                # Detailed file comparison
+                is_different, reason = self._compare_files(source_file, dest_file)
+                if is_different:
+                    logger.debug(f"File {rel_path} needs update: {reason}")
+                    differences['to_update'].append(str(rel_path))
+        
+        # Find deleted files
+        if self.dest_path.exists():
+            for dest_file in self.dest_path.rglob('*'):
+                if not self._running:
+                    break
+                    
+                if not dest_file.is_file():
+                    continue
+                    
+                rel_path = dest_file.relative_to(self.dest_path)
+                source_file = self.source_path / rel_path
+                
+                if not source_file.exists():
+                    differences['to_delete'].append(str(rel_path))
+        
+        return differences
             
     def perform_backup(self, differences: Dict, progress_callback: Callable = None) -> bool:
-        """Perform backup operation."""
+        """Execute backup operation based on analyzed differences.
+        
+        Args:
+            differences: Dictionary with files to process
+            progress_callback: Function to report progress
+            
+        Returns:
+            True if backup completed successfully
+        """
         try:
             self._running = True
             self.dest_path.mkdir(parents=True, exist_ok=True)
             
-            # Delete unnecessary files
+            total_files = len(differences['to_copy']) + len(differences['to_update']) + len(differences['to_delete'])
+            processed_files = 0
+            
+            # Delete unnecessary files first
             for rel_path in differences['to_delete']:
+                if not self._running:
+                    return False
+                    
                 try:
-                    success, message = self.handler.delete_path(self.dest_path / rel_path)
-                    if success:
-                        self.report_data['deleted_files'].append({
-                            "path": str(rel_path),
-                            "time": datetime.now()
-                        })
-                    else:
-                        logger.error(f"Failed to delete {rel_path}: {message}")
-                        self.report_data['errors'].append({
-                            "time": datetime.now(),
-                            "error": f"Failed to delete {rel_path}: {message}"
-                        })
+                    file_to_delete = self.dest_path / rel_path
+                    if file_to_delete.exists():
+                        file_to_delete.unlink()
+                        self.report_data['deleted_files'].append(str(rel_path))
                 except Exception as e:
                     logger.error(f"Failed to delete {rel_path}: {e}")
                     self.report_data['errors'].append({
                         "time": datetime.now(),
-                        "error": f"Failed to delete {rel_path}: {e}"
+                        "error": f"Delete error {rel_path}: {str(e)}"
                     })
+                
+                processed_files += 1
+                if progress_callback:
+                    progress_callback(f"Progress: {processed_files}/{total_files} files...")
 
             # Copy and update files
-            total_copied = 0
-            self.handler.CHUNK_SIZE = 1024 * 1024  # Use 1MB fixed chunk size
-            
-            for rel_path in differences['to_copy'] + differences['to_update']:
-                if not self._running:
-                    logger.info("Backup operation cancelled")
-                    return False
-                    
-                try:
-                    src_file = self.source_path / rel_path
-                    dest_file = self.dest_path / rel_path
-                    
-                    def file_progress(copied_size):
-                        if progress_callback:
-                            progress_callback(total_copied + copied_size, rel_path)
-                    
-                    success, message = self.handler.copy_file(src_file, dest_file, file_progress)
-                    if success:
-                        total_copied += src_file.stat().st_size
+            for operation in ['to_copy', 'to_update']:
+                for rel_path in differences[operation]:
+                    if not self._running:
+                        return False
                         
-                        # Log copied/updated file
-                        file_info = {
-                            "path": str(rel_path),
-                            "size": src_file.stat().st_size,
-                            "time": datetime.now()
-                        }
+                    try:
+                        src_file = self.source_path / rel_path
+                        dest_file = self.dest_path / rel_path
                         
-                        if rel_path in differences['to_copy']:
-                            self.report_data['copied_files'].append(file_info)
+                        # Ensure destination directory exists
+                        dest_file.parent.mkdir(parents=True, exist_ok=True)
+                        
+                        # Copy file
+                        self.handler.CHUNK_SIZE = 1024 * 1024  # 1MB chunks
+                        success, message = self.handler.copy_file(src_file, dest_file)
+                        
+                        if success:
+                            file_info = {
+                                "path": str(rel_path),
+                                "time": datetime.now(),
+                                "size": src_file.stat().st_size
+                            }
+                            
+                            if operation == 'to_copy':
+                                self.report_data['copied_files'].append(file_info)
+                            else:
+                                self.report_data['updated_files'].append(file_info)
                         else:
-                            self.report_data['updated_files'].append(file_info)
-                    else:
-                        logger.error(f"Failed to copy {rel_path}: {message}")
+                            raise Exception(message)
+                            
+                    except Exception as e:
+                        logger.error(f"Error during {operation} for {rel_path}: {e}")
                         self.report_data['errors'].append({
                             "time": datetime.now(),
-                            "error": f"Failed to copy {rel_path}: {message}"
+                            "error": f"Error {operation} {rel_path}: {str(e)}"
                         })
-                except Exception as e:
-                    logger.error(f"Unexpected error copying {rel_path}: {e}")
-                    self.report_data['errors'].append({
-                        "time": datetime.now(),
-                        "error": f"Unexpected error copying {rel_path}: {e}"
-                    })
+                    
+                    processed_files += 1
+                    if progress_callback:
+                        progress_callback(f"Progress: {processed_files}/{total_files} files...")
             
             self.report_data['end_time'] = datetime.now()
             self.save_report()
             return True
             
         except Exception as e:
-            logger.error(f"Backup operation failed: {e}")
+            logger.error(f"Backup failed: {e}")
             self.report_data['errors'].append({
                 "time": datetime.now(),
-                "error": f"Backup operation failed: {e}"
+                "error": f"Backup failed: {str(e)}"
             })
             self.report_data['end_time'] = datetime.now()
             self.save_report()
-            raise 
+            return False

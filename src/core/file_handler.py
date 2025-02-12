@@ -1,7 +1,8 @@
 import os
 import logging
+import shutil
 from pathlib import Path
-from typing import Callable, Tuple
+from typing import Tuple
 
 logger = logging.getLogger(__name__)
 
@@ -10,56 +11,38 @@ class FileOperationError(Exception):
     pass
 
 class FileHandler:
-    """Handles file operations for backup process."""
+    """Handles file operations with exact 1:1 copying."""
     
-    CHUNK_SIZE = 1024 * 1024  # 1MB chunks for file copying
-
-    @staticmethod
-    def copy_file(src_path: Path, dest_path: Path, progress_callback: Callable = None) -> Tuple[bool, str]:
-        """
-        Copy file with metadata preservation.
-        Returns: Tuple[success: bool, message: str]
+    def copy_file(self, source: Path, dest: Path) -> Tuple[bool, str]:
+        """Copy file with all metadata preserved.
+        
+        Uses shutil.copy2 for exact 1:1 copy including:
+        - File content
+        - Permissions
+        - Timestamps
+        - File flags
         """
         try:
-            # Verify source file exists and is readable
-            if not src_path.exists():
-                raise FileOperationError(f"Source file does not exist: {src_path}")
-            if not os.access(src_path, os.R_OK):
-                raise FileOperationError(f"Source file is not readable: {src_path}")
-
-            # Create parent directories if needed
-            dest_path.parent.mkdir(parents=True, exist_ok=True)
-
-            # Verify write permissions
-            if dest_path.exists() and not os.access(dest_path, os.W_OK):
-                raise FileOperationError(f"Destination file is not writable: {dest_path}")
-
-            # Copy file content
-            total_size = src_path.stat().st_size
-            copied_size = 0
-
-            with src_path.open('rb') as src, dest_path.open('wb') as dest:
-                while True:
-                    chunk = src.read(FileHandler.CHUNK_SIZE)
-                    if not chunk:
-                        break
-                    dest.write(chunk)
-                    
-                    if progress_callback:
-                        copied_size += len(chunk)
-                        progress_callback(copied_size)
-
-            # Copy metadata
-            os.utime(dest_path, (src_path.stat().st_atime, src_path.stat().st_mtime))
+            # Create parent directories if they don't exist
+            dest.parent.mkdir(parents=True, exist_ok=True)
             
-            return True, "File copied successfully"
-
-        except FileOperationError as e:
-            logger.error(f"File operation error: {e}")
-            return False, str(e)
+            # Perform exact copy
+            shutil.copy2(source, dest)
+            return True, "Success"
+            
         except Exception as e:
-            logger.error(f"Error copying {src_path}: {e}")
-            return False, f"Unexpected error: {str(e)}"
+            logger.error(f"Failed to copy {source} to {dest}: {e}")
+            return False, str(e)
+    
+    def delete_file(self, path: Path) -> Tuple[bool, str]:
+        """Safely delete a file."""
+        try:
+            if path.exists():
+                path.unlink()
+            return True, "Success"
+        except Exception as e:
+            logger.error(f"Failed to delete {path}: {e}")
+            return False, str(e)
 
     @staticmethod
     def delete_path(path: Path) -> Tuple[bool, str]:

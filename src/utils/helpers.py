@@ -1,7 +1,6 @@
-import os
 import psutil
 from pathlib import Path
-from typing import Tuple, Dict, Optional
+from typing import Dict, Optional
 from datetime import datetime
 
 def get_free_space(path: Path) -> int:

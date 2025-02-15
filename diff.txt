@@ -1,0 +1,3636 @@
+diff --git a/src/__init__.py b/src/__init__.py
+index 06d2ca3..6a966c5 100644
+--- a/src/__init__.py
++++ b/src/__init__.py
+@@ -1,3 +1,3 @@
+ """Backup Tool - A simple and reliable backup solution."""
+ 
+-__version__ = '1.0.0' 
+\ No newline at end of file
++__version__ = '1.0.0'
+diff --git a/src/core/__init__.py b/src/core/__init__.py
+index ce6713e..4b6a1ef 100644
+--- a/src/core/__init__.py
++++ b/src/core/__init__.py
+@@ -1 +1 @@
+-"""Core functionality for the Backup Tool.""" 
+\ No newline at end of file
++"""Core functionality for the Backup Tool."""
+diff --git a/src/core/backup_manager.py b/src/core/backup_manager.py
+index 25d249c..002e9ab 100644
+--- a/src/core/backup_manager.py
++++ b/src/core/backup_manager.py
+@@ -1,20 +1,21 @@
++import json
+ import logging
++import sys
++from datetime import datetime
+ from pathlib import Path
+ from typing import Dict, Tuple, Optional, Callable, List
+-from datetime import datetime
+-import json
+-import sys
+ 
+ from .file_analyzer import FileAnalyzer
+-from .file_handler import FileHandler, FileOperationError
+-from ..utils.helpers import get_free_space, format_size
++from .file_handler import FileHandler
+ from ..utils.hash_utils import get_file_signature
++from ..utils.helpers import get_free_space, format_size
+ 
+ logger = logging.getLogger(__name__)
+ 
++
+ class BackupManager:
+     """Manages backup operations."""
+-    
++
+     def __init__(self):
+         """Initialize backup manager."""
+         self.source_path: Optional[Path] = None
+@@ -31,20 +32,20 @@ class BackupManager:
+             'deleted_files': [],
+             'errors': []
+         }
+-        
++
+     def set_exclude_patterns(self, patterns: List[str]):
+         """Set patterns for files/directories to exclude."""
+         self.exclude_patterns = patterns
+-        
++
+     def stop(self):
+         """Stop current operation."""
+         self._running = False
+-        
++
+     def save_report(self):
+         """Save backup report to file."""
+         if not self.report_data['start_time']:
+             return
+-            
++
+         report_path = self.dest_path / 'backup_report.json'
+         try:
+             with open(report_path, 'w') as f:
+@@ -55,30 +56,30 @@ class BackupManager:
+     def prepare_backup(self, source_path: str, dest_path: str) -> Tuple[bool, str, Dict]:
+         """Prepare backup operation."""
+         self.report_data['start_time'] = datetime.now()
+-        
++
+         # Validate paths
+         valid, message = self.analyze_paths(source_path, dest_path)
+         if not valid:
+             self.report_data['errors'].append({"time": datetime.now(), "error": message})
+             return False, message, {}
+-            
++
+         # Check available space
+         try:
+             source_size = sum(
+-                f.stat().st_size for f in Path(source_path).rglob('*') 
++                f.stat().st_size for f in Path(source_path).rglob('*')
+                 if f.is_file() and not any(f.match(p) for p in self.exclude_patterns)
+             )
+             dest_free = get_free_space(self.dest_path.parent)
+-            
++
+             if dest_free < source_size:
+                 msg = f"Insufficient space. Need: {format_size(source_size)}, Available: {format_size(dest_free)}"
+                 self.report_data['errors'].append({"time": datetime.now(), "error": msg})
+                 return False, msg, {}
+-                
++
+         except Exception as e:
+             self.report_data['errors'].append({"time": datetime.now(), "error": str(e)})
+             return False, str(e), {}
+-            
++
+         # Analyze differences
+         try:
+             differences = self.analyze_differences()
+@@ -95,30 +96,30 @@ class BackupManager:
+         try:
+             self.source_path = Path(source_path)
+             self.dest_path = Path(dest_path)
+-            
++
+             if not self.source_path.exists():
+                 return False, "Source path does not exist"
+-                
++
+             if not self.source_path.is_dir():
+                 return False, "Source path must be a directory"
+-                
++
+             if self.dest_path.exists() and not self.dest_path.is_dir():
+                 return False, "Destination path must be a directory"
+-                
++
+             # Check if paths are the same
+             if self.source_path.resolve() == self.dest_path.resolve():
+                 return False, "Source and destination paths cannot be the same"
+-                
++
+             # Check if destination is subdirectory of source
+             if str(self.dest_path).startswith(str(self.source_path)):
+                 return False, "Destination cannot be a subdirectory of source"
+-                
++
+             return True, "Paths validated successfully"
+-            
++
+         except Exception as e:
+             logger.error(f"Path analysis failed: {e}")
+             return False, f"Path analysis failed: {str(e)}"
+-            
++
+     def _compare_files(self, source_file: Path, dest_file: Path) -> Tuple[bool, str]:
+         """Compare two files to determine if they are identical.
+         
+@@ -138,31 +139,31 @@ class BackupManager:
+         try:
+             src_stat = source_file.stat()
+             dst_stat = dest_file.stat()
+-            
++
+             if src_stat.st_size != dst_stat.st_size:
+                 return True, "Different file size"
+-                
++
+             # Use 2-second tolerance for filesystem differences
+             if abs(src_stat.st_mtime - dst_stat.st_mtime) > 2:
+                 return True, "Different modification time"
+-                
++
+             if hasattr(src_stat, 'st_mode'):
+                 if src_stat.st_mode != dst_stat.st_mode:
+                     return True, "Different file permissions"
+-            
++
+             # Compare content in chunks to minimize memory usage
+             CHUNK_SIZE = 8192  # 8KB chunks for efficient memory usage
+             with open(source_file, 'rb') as src, open(dest_file, 'rb') as dst:
+                 while True:
+                     src_chunk = src.read(CHUNK_SIZE)
+                     dst_chunk = dst.read(CHUNK_SIZE)
+-                    
++
+                     if src_chunk != dst_chunk:
+                         return True, "Different file content"
+-                    
++
+                     if not src_chunk:
+                         break
+-            
++
+             # Check Windows-specific attributes
+             try:
+                 # On Windows check attributes like hidden, system, readonly
+@@ -171,21 +172,21 @@ class BackupManager:
+                     import win32con
+                     src_attrs = win32api.GetFileAttributes(str(source_file))
+                     dst_attrs = win32api.GetFileAttributes(str(dest_file))
+-                    
++
+                     # Check only important attributes (hidden, system, readonly)
+                     important_attrs = (
+-                        win32con.FILE_ATTRIBUTE_HIDDEN |
+-                        win32con.FILE_ATTRIBUTE_SYSTEM |
+-                        win32con.FILE_ATTRIBUTE_READONLY
++                            win32con.FILE_ATTRIBUTE_HIDDEN |
++                            win32con.FILE_ATTRIBUTE_SYSTEM |
++                            win32con.FILE_ATTRIBUTE_READONLY
+                     )
+                     if (src_attrs & important_attrs) != (dst_attrs & important_attrs):
+                         return True, "Different system attributes"
+             except ImportError:
+                 # If we don't have access to win32api, skip these tests
+                 pass
+-                
++
+             return False, "Files are identical"
+-            
++
+         except Exception as e:
+             logger.error(f"Error comparing files: {e}")
+             return True, f"Comparison error: {str(e)}"
+@@ -204,28 +205,28 @@ class BackupManager:
+             'to_update': [],
+             'to_delete': []
+         }
+-        
++
+         if progress_callback:
+             progress_callback("Analyzing files...")
+-        
++
+         # Process source directory
+         total_files = 0
+         for source_file in self.source_path.rglob('*'):
+             if not self._running:
+                 break
+-                
++
+             # Skip directories and excluded files
+             if not source_file.is_file() or any(source_file.match(p) for p in self.exclude_patterns):
+                 continue
+-                
++
+             total_files += 1
+             if total_files % 100 == 0 and progress_callback:
+                 progress_callback(f"Analyzed {total_files} files...")
+-                
++
+             # Calculate relative path
+             rel_path = source_file.relative_to(self.source_path)
+             dest_file = self.dest_path / rel_path
+-            
++
+             # Check if file exists in destination
+             if not dest_file.exists():
+                 differences['to_copy'].append(str(rel_path))
+@@ -235,24 +236,24 @@ class BackupManager:
+                 if is_different:
+                     logger.debug(f"File {rel_path} needs update: {reason}")
+                     differences['to_update'].append(str(rel_path))
+-        
++
+         # Find deleted files
+         if self.dest_path.exists():
+             for dest_file in self.dest_path.rglob('*'):
+                 if not self._running:
+                     break
+-                    
++
+                 if not dest_file.is_file():
+                     continue
+-                    
++
+                 rel_path = dest_file.relative_to(self.dest_path)
+                 source_file = self.source_path / rel_path
+-                
++
+                 if not source_file.exists():
+                     differences['to_delete'].append(str(rel_path))
+-        
++
+         return differences
+-            
++
+     def perform_backup(self, differences: Dict, progress_callback: Callable = None) -> bool:
+         """Execute backup operation based on analyzed differences.
+         
+@@ -266,15 +267,15 @@ class BackupManager:
+         try:
+             self._running = True
+             self.dest_path.mkdir(parents=True, exist_ok=True)
+-            
++
+             total_files = len(differences['to_copy']) + len(differences['to_update']) + len(differences['to_delete'])
+             processed_files = 0
+-            
++
+             # Delete unnecessary files first
+             for rel_path in differences['to_delete']:
+                 if not self._running:
+                     return False
+-                    
++
+                 try:
+                     file_to_delete = self.dest_path / rel_path
+                     if file_to_delete.exists():
+@@ -286,7 +287,7 @@ class BackupManager:
+                         "time": datetime.now(),
+                         "error": f"Delete error {rel_path}: {str(e)}"
+                     })
+-                
++
+                 processed_files += 1
+                 if progress_callback:
+                     progress_callback(f"Progress: {processed_files}/{total_files} files...")
+@@ -296,47 +297,47 @@ class BackupManager:
+                 for rel_path in differences[operation]:
+                     if not self._running:
+                         return False
+-                        
++
+                     try:
+                         src_file = self.source_path / rel_path
+                         dest_file = self.dest_path / rel_path
+-                        
++
+                         # Ensure destination directory exists
+                         dest_file.parent.mkdir(parents=True, exist_ok=True)
+-                        
++
+                         # Copy file
+                         self.handler.CHUNK_SIZE = 1024 * 1024  # 1MB chunks
+                         success, message = self.handler.copy_file(src_file, dest_file)
+-                        
++
+                         if success:
+                             file_info = {
+                                 "path": str(rel_path),
+                                 "time": datetime.now(),
+                                 "size": src_file.stat().st_size
+                             }
+-                            
++
+                             if operation == 'to_copy':
+                                 self.report_data['copied_files'].append(file_info)
+                             else:
+                                 self.report_data['updated_files'].append(file_info)
+                         else:
+                             raise Exception(message)
+-                            
++
+                     except Exception as e:
+                         logger.error(f"Error during {operation} for {rel_path}: {e}")
+                         self.report_data['errors'].append({
+                             "time": datetime.now(),
+                             "error": f"Error {operation} {rel_path}: {str(e)}"
+                         })
+-                    
++
+                     processed_files += 1
+                     if progress_callback:
+                         progress_callback(f"Progress: {processed_files}/{total_files} files...")
+-            
++
+             self.report_data['end_time'] = datetime.now()
+             self.save_report()
+             return True
+-            
++
+         except Exception as e:
+             logger.error(f"Backup failed: {e}")
+             self.report_data['errors'].append({
+@@ -345,4 +346,4 @@ class BackupManager:
+             })
+             self.report_data['end_time'] = datetime.now()
+             self.save_report()
+-            return False
+\ No newline at end of file
++            return False
+diff --git a/src/core/file_analyzer.py b/src/core/file_analyzer.py
+index 2665664..41d9f14 100644
+--- a/src/core/file_analyzer.py
++++ b/src/core/file_analyzer.py
+@@ -4,9 +4,10 @@ from typing import List
+ 
+ logger = logging.getLogger(__name__)
+ 
++
+ class FileAnalyzer:
+     """Analyzes files for backup operations."""
+-    
++
+     @staticmethod
+     def are_files_identical(source: Path, dest: Path) -> bool:
+         """Check if two files are exactly the same.
+@@ -19,20 +20,20 @@ class FileAnalyzer:
+         try:
+             if not source.exists() or not dest.exists():
+                 return False
+-                
++
+             src_stat = source.stat()
+             dst_stat = dest.stat()
+-            
++
+             # Compare basic attributes
+             return (
+-                src_stat.st_size == dst_stat.st_size and
+-                src_stat.st_mode == dst_stat.st_mode and
+-                abs(src_stat.st_mtime - dst_stat.st_mtime) <= 2  # 2-second tolerance
++                    src_stat.st_size == dst_stat.st_size and
++                    src_stat.st_mode == dst_stat.st_mode and
++                    abs(src_stat.st_mtime - dst_stat.st_mtime) <= 2  # 2-second tolerance
+             )
+         except Exception as e:
+             logger.error(f"Error comparing files {source} and {dest}: {e}")
+             return False
+-    
++
+     def get_file_list(self, directory: Path, exclude_patterns: List[str] = None) -> List[Path]:
+         """Get list of files in directory, excluding patterns."""
+         files = []
+@@ -40,12 +41,12 @@ class FileAnalyzer:
+             for file_path in directory.rglob('*'):
+                 if not file_path.is_file():
+                     continue
+-                    
++
+                 if exclude_patterns and any(file_path.match(p) for p in exclude_patterns):
+                     continue
+-                    
++
+                 files.append(file_path)
+         except Exception as e:
+             logger.error(f"Error scanning directory {directory}: {e}")
+-            
+-        return files
+\ No newline at end of file
++
++        return files
+diff --git a/src/core/file_handler.py b/src/core/file_handler.py
+index 871994e..f8c90e8 100644
+--- a/src/core/file_handler.py
++++ b/src/core/file_handler.py
+@@ -1,18 +1,20 @@
+-import os
+ import logging
++import os
+ import shutil
+ from pathlib import Path
+ from typing import Tuple
+ 
+ logger = logging.getLogger(__name__)
+ 
++
+ class FileOperationError(Exception):
+     """Custom exception for file operations"""
+     pass
+ 
++
+ class FileHandler:
+     """Handles file operations with exact 1:1 copying."""
+-    
++
+     def copy_file(self, source: Path, dest: Path) -> Tuple[bool, str]:
+         """Copy file with all metadata preserved.
+         
+@@ -25,15 +27,15 @@ class FileHandler:
+         try:
+             # Create parent directories if they don't exist
+             dest.parent.mkdir(parents=True, exist_ok=True)
+-            
++
+             # Perform exact copy
+             shutil.copy2(source, dest)
+             return True, "Success"
+-            
++
+         except Exception as e:
+             logger.error(f"Failed to copy {source} to {dest}: {e}")
+             return False, str(e)
+-    
++
+     def delete_file(self, path: Path) -> Tuple[bool, str]:
+         """Safely delete a file."""
+         try:
+@@ -53,10 +55,10 @@ class FileHandler:
+         try:
+             if not path.exists():
+                 return True, "Path already deleted"
+-                
++
+             if not os.access(path, os.W_OK):
+                 raise FileOperationError(f"Path is not writable: {path}")
+-                
++
+             if path.is_file():
+                 path.unlink()
+                 logger.info(f"Deleted file: {path}")
+@@ -74,12 +76,12 @@ class FileHandler:
+                 # Usuń pusty katalog
+                 path.rmdir()
+                 logger.info(f"Deleted directory: {path}")
+-                
++
+             return True, "Path deleted successfully"
+-            
++
+         except FileOperationError as e:
+             logger.error(f"File operation error: {e}")
+             return False, str(e)
+         except Exception as e:
+             logger.error(f"Error deleting {path}: {e}")
+-            return False, f"Unexpected error: {str(e)}" 
+\ No newline at end of file
++            return False, f"Unexpected error: {str(e)}"
+diff --git a/src/core/file_queue.py b/src/core/file_queue.py
+index 0fbe7e8..59d7380 100644
+--- a/src/core/file_queue.py
++++ b/src/core/file_queue.py
+@@ -1,20 +1,20 @@
++import heapq
+ import logging
+-from pathlib import Path
+-from typing import List, Dict, Optional
++import time
+ from dataclasses import dataclass
+ from enum import Enum
+-import heapq
+-import time
++from pathlib import Path
++from typing import List, Dict, Optional
+ 
+ logger = logging.getLogger(__name__)
+ 
+ 
+ class OperationType(Enum):
+     """Types of file operations with their base priorities."""
+-    DELETE = 100        # Highest priority - free up space first
+-    MOVE = 80           # Then handle moves
+-    UPDATE = 60         # Then update existing files
+-    COPY = 40           # Finally copy new files
++    DELETE = 100  # Highest priority - free up space first
++    MOVE = 80  # Then handle moves
++    UPDATE = 60  # Then update existing files
++    COPY = 40  # Finally copy new files
+ 
+ 
+ @dataclass
+@@ -47,23 +47,23 @@ class FileQueue:
+     """
+ 
+     # Size thresholds (in bytes)
+-    SMALL_FILE_THRESHOLD = 10 * 1024 * 1024     # 10 MB
+-    LARGE_FILE_THRESHOLD = 100 * 1024 * 1024    # 100 MB
++    SMALL_FILE_THRESHOLD = 10 * 1024 * 1024  # 10 MB
++    LARGE_FILE_THRESHOLD = 100 * 1024 * 1024  # 100 MB
+ 
+     # Priority modifiers
+-    SMALL_FILE_BONUS = 20       # Bonus for small files
+-    LARGE_FILE_PENALTY = 10     # Penalty for large files
+-    DEPTH_PENALTY = 5           # Penalty per directory level
++    SMALL_FILE_BONUS = 20  # Bonus for small files
++    LARGE_FILE_PENALTY = 10  # Penalty for large files
++    DEPTH_PENALTY = 5  # Penalty per directory level
+ 
+     # Speed calculation constants
+-    SPEED_WINDOW_SIZE = 20          # Number of samples for speed calculation
+-    SPEED_UPDATE_INTERVAL = 1.0     # Update speed every second
+-    ETA_SMOOTHING_FACTOR = 0.2      # ETA smoothing factor (0-1)
+-    
++    SPEED_WINDOW_SIZE = 20  # Number of samples for speed calculation
++    SPEED_UPDATE_INTERVAL = 1.0  # Update speed every second
++    ETA_SMOOTHING_FACTOR = 0.2  # ETA smoothing factor (0-1)
++
+     # Memory management constants
+-    MAX_COMPLETED_ITEMS = 1000          # Maximum number of completed items to keep
++    MAX_COMPLETED_ITEMS = 1000  # Maximum number of completed items to keep
+     COMPLETED_CLEANUP_THRESHOLD = 1200  # When to trigger cleanup
+-    MAX_SPEED_SAMPLES = 100             # Maximum number of speed samples to keep
++    MAX_SPEED_SAMPLES = 100  # Maximum number of speed samples to keep
+ 
+     def __init__(self):
+         """Initialize the file queue."""
+@@ -233,7 +233,7 @@ class FileQueue:
+ 
+         logger.debug(
+             f"Priority calculated for {path}: {priority:.2f} "
+-            f"(size: {size/1024/1024:.1f}MB, depth: {depth})"
++            f"(size: {size / 1024 / 1024:.1f}MB, depth: {depth})"
+         )
+ 
+         return priority
+@@ -289,7 +289,7 @@ class FileQueue:
+ 
+             logger.debug(
+                 f"Added operation: {op_type.name} {path} "
+-                f"(size: {size/1024/1024:.1f}MB, priority: {priority:.2f})"
++                f"(size: {size / 1024 / 1024:.1f}MB, priority: {priority:.2f})"
+             )
+ 
+         except Exception as e:
+@@ -303,7 +303,7 @@ class FileQueue:
+             Next FileOperation to process, or None if queue is empty
+         """
+         while self.queue:
+-            # Get highest priority operation
++            # Get the highest priority operation
+             operation = heapq.heappop(self.queue)
+ 
+             # Check if all dependencies are completed
+diff --git a/src/gui/__init__.py b/src/gui/__init__.py
+index ce2f64e..d315281 100644
+--- a/src/gui/__init__.py
++++ b/src/gui/__init__.py
+@@ -1 +1 @@
+-"""GUI components for the Backup Tool.""" 
+\ No newline at end of file
++"""GUI components for the Backup Tool."""
+diff --git a/src/gui/dialogs.py b/src/gui/dialogs.py
+index bd68448..b3ca3d7 100644
+--- a/src/gui/dialogs.py
++++ b/src/gui/dialogs.py
+@@ -1,27 +1,29 @@
++import logging
++from typing import Dict, List
++
++from PyQt6.QtCore import Qt
++from PyQt6.QtGui import QColor
+ from PyQt6.QtWidgets import (
+     QDialog, QVBoxLayout, QHBoxLayout, QLabel,
+     QDialogButtonBox, QTableWidget, QComboBox,
+     QTableWidgetItem, QHeaderView, QLineEdit, QCheckBox
+ )
+-from PyQt6.QtCore import Qt
+-from PyQt6.QtGui import QColor
+-from typing import Dict, List
+-import logging
+ 
+ from ..utils.helpers import format_size, get_file_info
+ 
+ logger = logging.getLogger(__name__)
+ 
++
+ class PathVerificationDialog(QDialog):
+     """Dialog for verifying backup paths and operations."""
+-    
++
+     OPERATIONS = {
+-        'copy': {'text': 'Copy', 'color': QColor('#4CAF50')},       # Green
+-        'update': {'text': 'Update', 'color': QColor('#2196F3')},   # Blue
+-        'move': {'text': 'Move', 'color': QColor('#FF9800')},       # Orange
+-        'delete': {'text': 'Delete', 'color': QColor('#F44336')}    # Red
++        'copy': {'text': 'Copy', 'color': QColor('#4CAF50')},  # Green
++        'update': {'text': 'Update', 'color': QColor('#2196F3')},  # Blue
++        'move': {'text': 'Move', 'color': QColor('#FF9800')},  # Orange
++        'delete': {'text': 'Delete', 'color': QColor('#F44336')}  # Red
+     }
+-    
++
+     def __init__(self, differences: Dict, parent=None):
+         """Initialize the dialog.
+         
+@@ -33,23 +35,23 @@ class PathVerificationDialog(QDialog):
+         self.differences = differences
+         self.filtered_items = []  # Store filtered items
+         self.setup_ui()
+-        
++
+     def setup_ui(self):
+-        """Setup the dialog UI."""
++        """Set up the dialog UI."""
+         self.setWindowTitle("Backup Verification")
+         self.setFixedWidth(600)  # Increased width for better readability
+         self.setMinimumHeight(500)  # Added minimum height
+-        
++
+         layout = QVBoxLayout(self)
+         layout.setSpacing(10)
+-        
++
+         # Summary
+         to_copy = len(self.differences['to_copy'])
+         to_update = len(self.differences['to_update'])
+         to_move = len(self.differences.get('to_move', []))
+         to_delete = len(self.differences.get('to_delete', []))
+         total_size = self.calculate_total_size()
+-        
++
+         summary = QLabel(
+             f"<b>Summary:</b><br>"
+             f"Files to copy: <span style='color: #4CAF50'>{to_copy}</span><br>"
+@@ -61,10 +63,10 @@ class PathVerificationDialog(QDialog):
+         )
+         summary.setTextFormat(Qt.TextFormat.RichText)
+         layout.addWidget(summary)
+-        
++
+         # Filter controls
+         filter_layout = QHBoxLayout()
+-        
++
+         # Operation filter
+         self.operation_filter = QComboBox()
+         self.operation_filter.addItem("All Operations")
+@@ -73,35 +75,35 @@ class PathVerificationDialog(QDialog):
+         self.operation_filter.currentTextChanged.connect(self.apply_filters)
+         filter_layout.addWidget(QLabel("Operation:"))
+         filter_layout.addWidget(self.operation_filter)
+-        
++
+         # Path filter
+         self.path_filter = QLineEdit()
+         self.path_filter.setPlaceholderText("Filter by path...")
+         self.path_filter.textChanged.connect(self.apply_filters)
+         filter_layout.addWidget(QLabel("Path:"))
+         filter_layout.addWidget(self.path_filter)
+-        
++
+         # Size filter
+         self.size_filter = QComboBox()
+         self.size_filter.addItems(["All Sizes", "< 1MB", "1MB - 10MB", "10MB - 100MB", "100MB - 1GB", "> 1GB"])
+         self.size_filter.currentTextChanged.connect(self.apply_filters)
+         filter_layout.addWidget(QLabel("Size:"))
+         filter_layout.addWidget(self.size_filter)
+-        
++
+         layout.addLayout(filter_layout)
+-        
++
+         # Files table
+         self.table = QTableWidget()
+         self.table.setColumnCount(4)
+         self.table.setHorizontalHeaderLabels(["Operation", "Path", "Size", "Status"])
+-        
++
+         # Set table properties
+         header = self.table.horizontalHeader()
+         header.setSectionResizeMode(0, QHeaderView.ResizeMode.ResizeToContents)
+         header.setSectionResizeMode(1, QHeaderView.ResizeMode.Stretch)
+         header.setSectionResizeMode(2, QHeaderView.ResizeMode.ResizeToContents)
+         header.setSectionResizeMode(3, QHeaderView.ResizeMode.ResizeToContents)
+-        
++
+         self.table.setAlternatingRowColors(True)
+         self.table.verticalHeader().setVisible(False)
+         self.table.setShowGrid(True)
+@@ -114,33 +116,33 @@ class PathVerificationDialog(QDialog):
+                 padding: 5px;
+             }
+         """)
+-        
++
+         layout.addWidget(self.table)
+-            
++
+         # Buttons
+         button_layout = QHBoxLayout()
+-        
++
+         # Select all checkbox
+         self.select_all = QCheckBox("Select All")
+         self.select_all.stateChanged.connect(self.toggle_all_items)
+         button_layout.addWidget(self.select_all)
+-        
++
+         button_layout.addStretch()
+-        
++
+         # Standard buttons
+         buttons = QDialogButtonBox(
+-            QDialogButtonBox.StandardButton.Ok | 
++            QDialogButtonBox.StandardButton.Ok |
+             QDialogButtonBox.StandardButton.Cancel
+         )
+         buttons.accepted.connect(self.accept)
+         buttons.rejected.connect(self.reject)
+         button_layout.addWidget(buttons)
+-        
++
+         layout.addLayout(button_layout)
+-        
++
+         # Populate table
+         self.populate_table()
+-        
++
+     def calculate_total_size(self) -> int:
+         """Calculate total size of all files to be processed."""
+         total = 0
+@@ -152,7 +154,7 @@ class PathVerificationDialog(QDialog):
+             except Exception as e:
+                 logger.warning(f"Failed to get size for {path}: {e}")
+         return total
+-        
++
+     def get_file_status(self, path: str, operation: str) -> str:
+         """Get status information for a file."""
+         try:
+@@ -164,24 +166,24 @@ class PathVerificationDialog(QDialog):
+         except Exception as e:
+             logger.warning(f"Failed to get status for {path}: {e}")
+         return ""
+-        
++
+     def populate_table(self):
+         """Populate the table with files to process."""
+         try:
+             self.table.setRowCount(0)
+             self.filtered_items.clear()
+-            
++
+             operations = {
+                 'to_copy': ('copy', "Copy"),
+                 'to_update': ('update', "Update"),
+                 'to_move': ('move', "Move"),
+                 'to_delete': ('delete', "Delete")
+             }
+-            
++
+             for diff_key, (op_key, op_text) in operations.items():
+                 if diff_key not in self.differences:
+                     continue
+-                    
++
+                 for path in self.differences[diff_key]:
+                     try:
+                         file_info = get_file_info(path)
+@@ -191,9 +193,9 @@ class PathVerificationDialog(QDialog):
+                         else:
+                             size = 0
+                             size_str = format_size(0)
+-                            
++
+                         status = self.get_file_status(path, op_key)
+-                        
++
+                         self.filtered_items.append({
+                             'operation': op_key,
+                             'path': path,
+@@ -203,31 +205,32 @@ class PathVerificationDialog(QDialog):
+                         })
+                     except Exception as e:
+                         logger.warning(f"Failed to process {path}: {e}")
+-            
++
+             self.apply_filters()
+-            
++
+         except Exception as e:
+             logger.error(f"Error populating table: {e}")
+             self.reject()
+-            
++
+     def apply_filters(self):
+         """Apply filters to the table items."""
+         try:
+             self.table.setRowCount(0)
+-            
++
+             operation_filter = self.operation_filter.currentText()
+             path_filter = self.path_filter.text().lower()
+             size_filter = self.size_filter.currentText()
+-            
++
+             for item in self.filtered_items:
+                 # Apply operation filter
+-                if operation_filter != "All Operations" and operation_filter != self.OPERATIONS[item['operation']]['text']:
++                if (operation_filter != "All Operations" and
++                        operation_filter != self.OPERATIONS[item['operation']]['text']):
+                     continue
+-                    
++
+                 # Apply path filter
+                 if path_filter and path_filter not in item['path'].lower():
+                     continue
+-                    
++
+                 # Apply size filter
+                 size_mb = item['size'] / (1024 * 1024)
+                 if size_filter != "All Sizes":
+@@ -241,16 +244,16 @@ class PathVerificationDialog(QDialog):
+                         continue
+                     elif size_filter == "> 1GB" and size_mb < 1024:
+                         continue
+-                
++
+                 # Add row
+                 row = self.table.rowCount()
+                 self.table.insertRow(row)
+-                
++
+                 # Operation
+                 op_item = QTableWidgetItem(self.OPERATIONS[item['operation']]['text'])
+                 op_item.setForeground(self.OPERATIONS[item['operation']]['color'])
+                 op_item.setTextAlignment(Qt.AlignmentFlag.AlignCenter)
+-                
++
+                 # Path
+                 path_item = QTableWidgetItem(item['path'])
+                 path_item.setToolTip(
+@@ -258,28 +261,28 @@ class PathVerificationDialog(QDialog):
+                     f"Size: {item['size_str']}\n"
+                     f"Status: {item['status']}"
+                 )
+-                
++
+                 # Size
+                 size_item = QTableWidgetItem(item['size_str'])
+                 size_item.setTextAlignment(Qt.AlignmentFlag.AlignRight | Qt.AlignmentFlag.AlignVCenter)
+-                
++
+                 # Status
+                 status_item = QTableWidgetItem(item['status'])
+                 status_item.setTextAlignment(Qt.AlignmentFlag.AlignCenter)
+-                
++
+                 self.table.setItem(row, 0, op_item)
+                 self.table.setItem(row, 1, path_item)
+                 self.table.setItem(row, 2, size_item)
+                 self.table.setItem(row, 3, status_item)
+-            
++
+         except Exception as e:
+             logger.error(f"Error applying filters: {e}")
+-            
++
+     def toggle_all_items(self, state):
+         """Toggle selection of all visible items."""
+         for row in range(self.table.rowCount()):
+             self.table.item(row, 0).setSelected(state == Qt.CheckState.Checked)
+-            
++
+     def get_selected_items(self) -> Dict[str, List[str]]:
+         """Get dictionary of selected items grouped by operation."""
+         selected = {
+@@ -288,15 +291,15 @@ class PathVerificationDialog(QDialog):
+             'to_move': [],
+             'to_delete': []
+         }
+-        
++
+         for row in range(self.table.rowCount()):
+             if self.table.item(row, 0).isSelected():
+                 operation = self.table.item(row, 0).text()
+                 path = self.table.item(row, 1).text()
+-                
++
+                 for op_key, op_data in self.OPERATIONS.items():
+                     if op_data['text'] == operation:
+                         selected[f'to_{op_key}'].append(path)
+                         break
+-        
+-        return selected 
+\ No newline at end of file
++
++        return selected
+diff --git a/src/gui/main_window.py b/src/gui/main_window.py
+index 733a93c..a51e157 100644
+--- a/src/gui/main_window.py
++++ b/src/gui/main_window.py
+@@ -1,28 +1,29 @@
++import json
+ import logging
++import math
++import time
++from datetime import datetime
+ from pathlib import Path
+ from typing import Tuple, Dict, Optional, List, Any
++
++from PyQt6.QtCore import QThread, pyqtSignal, Qt
+ from PyQt6.QtWidgets import (
+-    QMainWindow, QWidget, QVBoxLayout, QHBoxLayout, 
++    QMainWindow, QWidget, QVBoxLayout, QHBoxLayout,
+     QPushButton, QLabel, QFileDialog, QMessageBox,
+     QGroupBox, QLineEdit, QCheckBox, QComboBox,
+     QSystemTrayIcon, QApplication
+ )
+-from PyQt6.QtCore import QThread, pyqtSignal, Qt
+-import time
+-import json
+-import math
+-from datetime import datetime
+ 
++from .dialogs import PathVerificationDialog
++from .tray_manager import TrayManager
++from .widgets import AnimatedProgressBar
+ from ..core.backup_manager import BackupManager
+-from ..utils.helpers import format_size
++from ..utils.cleanup import CleanupManager
+ from ..utils.error_handler import ErrorTracker, ConfigurationError
++from ..utils.helpers import format_size
+ from ..utils.memory_manager import MemoryManager
+ from ..utils.recovery import AutomaticRecovery
+-from ..utils.cleanup import CleanupManager
+ from ..utils.update_checker import UpdateChecker
+-from .widgets import AnimatedProgressBar
+-from .dialogs import PathVerificationDialog
+-from .tray_manager import TrayManager
+ 
+ logger = logging.getLogger(__name__)
+ 
+@@ -39,6 +40,7 @@ PATH_SELECT_ERROR = "Please select both paths"
+ BACKUP_CANCEL_CONFIRM = "Are you sure you want to stop the backup operation?"
+ EXIT_CONFIRM = "A backup operation is in progress. Are you sure you want to exit?"
+ 
++
+ def format_path_display(path: Path) -> Tuple[str, str]:
+     """Format path for display with preview.
+     
+@@ -62,34 +64,36 @@ def format_path_display(path: Path) -> Tuple[str, str]:
+         path_display = drive
+     return drive, path_display
+ 
++
+ def truncate_path(path: str, max_length: int) -> str:
+     """Truncate path to specified length while preserving important parts."""
+     if len(path) <= max_length:
+         return path
+-        
++
+     path_obj = Path(path)
+     parts = list(path_obj.parts)
+-    
++
+     if len(parts) <= 2:
+         return path
+-        
++
+     # Always keep drive/root and last component
+     drive = parts[0]
+     last_part = parts[-1]
+     middle_parts = parts[1:-1]
+-    
++
+     # If we have too many parts, keep only first and last from middle
+     if len(middle_parts) > 2:
+         middle_parts = [middle_parts[0], "...", middle_parts[-1]]
+-    
++
+     # Construct path and check length
+     result = str(Path(drive) / Path(*middle_parts) / last_part)
+     if len(result) <= max_length:
+         return result
+-        
++
+     # If still too long, show only drive, ... and filename
+     return str(Path(drive) / "..." / last_part)
+ 
++
+ class BackupThread(QThread):
+     """Thread responsible for performing the backup operation.
+     
+@@ -100,13 +104,13 @@ class BackupThread(QThread):
+         current_file (str, str): Emits current file path and size
+         stats_update (dict): Emits dictionary with speed, ETA and size statistics
+     """
+-    
++
+     progress = pyqtSignal(float)
+     finished = pyqtSignal(bool, str)
+     status = pyqtSignal(str)
+     current_file = pyqtSignal(str, str)  # path, size
+     stats_update = pyqtSignal(dict)  # For speed, eta, total size updates
+-    
++
+     def __init__(self, manager: BackupManager, differences: Dict):
+         """Initialize the backup thread.
+         
+@@ -122,7 +126,7 @@ class BackupThread(QThread):
+         self.start_time: Optional[float] = None
+         self.total_size = 0
+         self.processed_size = 0
+-        
++
+         # Speed calculation variables
+         self.speed_samples: List[float] = []
+         self.SPEED_WINDOW_SIZE = 150  # Large window for better stability
+@@ -133,7 +137,7 @@ class BackupThread(QThread):
+         self.last_eta = 0.0  # For ETA smoothing
+         self.min_speed = float('inf')  # Track minimum speed
+         self.max_speed = 0.0  # Track maximum speed
+-        
++
+         # Calculate total size
+         for file_type in ['to_copy', 'to_update']:
+             for file_path in differences[file_type]:
+@@ -142,9 +146,9 @@ class BackupThread(QThread):
+                     self.total_size += full_path.stat().st_size
+                 except Exception as e:
+                     logger.warning(f"Failed to get size for {file_path}: {e}")
+-        
++
+     def format_speed(self, bytes_per_sec: float) -> str:
+-        """Format speed in bytes/sec to human readable format.
++        """Format speed in bytes/sec to human-readable format.
+         
+         Args:
+             bytes_per_sec: Speed in bytes per second
+@@ -153,9 +157,9 @@ class BackupThread(QThread):
+             Formatted string with appropriate unit/s
+         """
+         return f"{format_size(bytes_per_sec)}/s"
+-        
++
+     def format_time(self, seconds: float) -> str:
+-        """Format time in seconds to human readable format.
++        """Format time in seconds to human-readable format.
+         
+         Args:
+             seconds: Time in seconds
+@@ -171,7 +175,7 @@ class BackupThread(QThread):
+         else:
+             hours = seconds / 3600
+             return f"{hours:.1f}h"
+-        
++
+     def update_progress(self, copied_size: int, current_file: Optional[str] = None):
+         """Update progress and statistics.
+         
+@@ -181,62 +185,62 @@ class BackupThread(QThread):
+         """
+         current_time = time.time()
+         self.processed_size = copied_size
+-        
++
+         # Calculate progress percentage
+         progress = (self.processed_size / self.total_size * 100) if self.total_size > 0 else 0
+         self.progress.emit(progress)
+-        
++
+         # Update stats every MIN_UPDATE_INTERVAL seconds
+         if current_time - self.last_update_time >= self.MIN_UPDATE_INTERVAL:
+             # Calculate instantaneous speed
+             size_delta = self.processed_size - self.last_processed_size
+             time_delta = current_time - self.last_update_time
+-            
++
+             if time_delta > 0:
+                 instant_speed = size_delta / time_delta
+                 self.speed_samples.append(instant_speed)
+-                
++
+                 # Keep only the last N samples
+                 if len(self.speed_samples) > self.SPEED_WINDOW_SIZE:
+                     self.speed_samples.pop(0)
+-                
++
+                 # Calculate weighted average with emphasis on middle samples
+                 # for better stability and accuracy
+                 total_weight = 0
+                 weighted_speed = 0
+                 samples_count = len(self.speed_samples)
+-                
++
+                 if samples_count > 0:
+                     # Gaussian weights - higher importance for middle samples
+                     middle = samples_count / 2
+                     sigma = samples_count / 6  # Gaussian curve width
+-                    
++
+                     for i, speed in enumerate(self.speed_samples):
+                         # Gaussian weight - highest in the middle
+                         weight = math.exp(-((i - middle) ** 2) / (2 * sigma ** 2))
+                         weighted_speed += speed * weight
+                         total_weight += weight
+-                    
++
+                     self.current_speed = weighted_speed / total_weight if total_weight > 0 else 0
+-                    
++
+                     # Update min/max speeds (ignore first few samples for stability)
+                     if samples_count > 5 and self.current_speed > 0:
+                         self.min_speed = min(self.min_speed, self.current_speed)
+                         self.max_speed = max(self.max_speed, self.current_speed)
+-            
++
+             # Calculate ETA using moving average speed
+             eta_seconds = 0  # Initialize default value
+-            
++
+             if self.current_speed > 0:
+                 remaining_size = self.total_size - self.processed_size
+-                
++
+                 # Use combination of different methods for better accuracy
+                 if self.start_time:
+                     total_time = current_time - self.start_time
+                     if total_time > 0:
+                         # Average speed from entire transfer
+                         average_speed = self.processed_size / total_time
+-                        
++
+                         # Weights for different components
+                         if total_time < 10:  # First 10 seconds - mainly current speed
+                             current_weight = 0.8
+@@ -247,26 +251,26 @@ class BackupThread(QThread):
+                         else:  # Above 30 seconds - higher weight for total average
+                             current_weight = 0.3
+                             average_weight = 0.7
+-                        
++
+                         estimated_speed = (self.current_speed * current_weight) + (average_speed * average_weight)
+-                        
++
+                         new_eta = remaining_size / estimated_speed
+-                        
++
+                         # ETA smoothing
+                         if self.last_eta > 0:
+                             # Gradual ETA change
+                             eta_change_weight = 0.2  # Maximum change of 20%
+-                            eta_seconds = (self.last_eta * (1 - eta_change_weight) + 
+-                                        new_eta * eta_change_weight)
++                            eta_seconds = (self.last_eta * (1 - eta_change_weight) +
++                                           new_eta * eta_change_weight)
+                         else:
+                             eta_seconds = new_eta
+-                        
++
+                         self.last_eta = eta_seconds
+                     else:
+                         eta_seconds = remaining_size / self.current_speed
+             else:
+-                    eta_seconds = remaining_size / self.current_speed
+-            
++                eta_seconds = remaining_size / self.current_speed
++
+             # Update stats
+             self.stats_update.emit({
+                 'speed': f"Speed: {self.format_speed(self.current_speed)}",
+@@ -276,81 +280,83 @@ class BackupThread(QThread):
+                 'processed_size': f"Size: {format_size(self.processed_size)} / {format_size(self.total_size)}",
+                 'percent': progress
+             })
+-            
++
+             self.last_update_time = current_time
+             self.last_processed_size = self.processed_size
+-            
++
+         # Update current file info if provided
+         if current_file:
+             self.current_file_number += 1
+             file_size = 0
+             size_str = "Unknown"
+-            
++
+             try:
+                 full_path = Path(self.manager.source_path) / current_file
+                 file_size = full_path.stat().st_size
+                 size_str = format_size(file_size)
+             except Exception as e:
+                 logger.warning(f"Failed to get size for {current_file}: {e}")
+-            
++
+             truncated_file = truncate_path(current_file, 50)
+             self.current_file.emit(str(full_path), size_str)
+-            
++
+             source_path = Path(self.manager.source_path)
+             _, path_display = format_path_display(source_path)
+-            
++
+             self.status.emit(
+                 f"{CREATING_BACKUP_MSG} ({self.current_file_number}/{self.total_files}) - "
+                 f"[{path_display}] {truncated_file}"
+             )
+-        
++
+     def run(self):
+         try:
+             self.start_time = time.time()
+             self.last_update_time = self.start_time
+-            
++
+             success = self.manager.perform_backup(
+                 self.differences,
+                 self.update_progress
+             )
+-            
++
+             if success:
+                 total_time = time.time() - self.start_time
+                 avg_speed = self.total_size / total_time if total_time > 0 else 0
+-                self.finished.emit(True, 
+-                    f"Backup completed successfully!\n"
+-                    f"Total size: {format_size(self.total_size)}\n"
+-                    f"Average speed: {self.format_speed(avg_speed)}\n"
+-                    f"Time taken: {self.format_time(total_time)}"
+-                )
++                self.finished.emit(True,
++                                   f"Backup completed successfully!\n"
++                                   f"Total size: {format_size(self.total_size)}\n"
++                                   f"Average speed: {self.format_speed(avg_speed)}\n"
++                                   f"Time taken: {self.format_time(total_time)}"
++                                   )
+             else:
+                 self.finished.emit(False, "Backup failed!")
+         except Exception as e:
+             logger.error(f"Backup error: {e}")
+             self.finished.emit(False, str(e))
+ 
++
+ class ScanThread(QThread):
+     """Thread for scanning directories and preparing backup."""
+     finished = pyqtSignal(bool, str, dict)
+     status = pyqtSignal(str)
+     current_file = pyqtSignal(str)
+-    
++
+     def __init__(self, manager: BackupManager, source_path: str, dest_path: str):
+         super().__init__()
+         self.manager = manager
+         self.source_path = source_path
+         self.dest_path = dest_path
+-        
++
+     def run(self):
+         try:
+             source_path = Path(self.source_path)
+             dest_path = Path(self.dest_path)
+-            
++
+             # Get formatted paths for display
+             _, source_path_display = format_path_display(source_path)
+             _, dest_path_display = format_path_display(dest_path)
+-            
+-            self.status.emit(f"{ANALYZING_PATHS_MSG} [Source: {source_path_display}] [Destination: {dest_path_display}]")
++
++            self.status.emit(
++                f"{ANALYZING_PATHS_MSG} [Source: {source_path_display}] [Destination: {dest_path_display}]")
+             success, message = self.manager.analyze_paths(self.source_path, self.dest_path)
+             if not success:
+                 self.finished.emit(False, message, {})
+@@ -364,10 +370,10 @@ class ScanThread(QThread):
+                     if "(" in file_path:
+                         file_path, file_count = file_path.rsplit("(", 1)
+                         file_count = file_count.rstrip(")")  # Remove closing parenthesis
+-                    
++
+                     full_path = str(Path(self.source_path) / file_path)
+                     _, path_display = format_path_display(source_path)
+-                    
++
+                     status_msg = (
+                         f"{SCANNING_MSG} ({file_count}) - "
+                         f"[{path_display}] {file_path.strip()}"
+@@ -378,78 +384,79 @@ class ScanThread(QThread):
+             differences = self.manager.analyze_differences(
+                 progress_callback=progress_update
+             )
+-            
++
+             total_files = len(differences['to_copy']) + len(differences['to_update'])
+             if total_files == 0:
+                 self.finished.emit(True, NO_FILES_MSG, differences)
+             else:
+                 self.finished.emit(True, f"Found {total_files} files to process", differences)
+-                
++
+         except Exception as e:
+             logger.error(f"Scan error: {e}")
+             self.finished.emit(False, str(e), {})
+ 
++
+ class MainWindow(QMainWindow):
+     """Main window of the backup application."""
+-    
++
+     def __init__(self, config: Dict, config_path: str):
+         """Initialize the main window."""
+         super().__init__()
+         self.config = config
+         self.config_path = config_path
+-        
++
+         # Initialize state
+         self.scanning = False
+         self.backing_up = False
+         self.backup_manager = BackupManager()
+         self.quit_requested = False
+-        
++
+         # First setup UI to create all fields
+         self.setup_ui()
+-        
++
+         # Initialize managers
+         self.setup_error_handling()
+         self.setup_memory_management()
+         self.setup_recovery()
+         self.setup_cleanup()
+         self.setup_update_checker()
+-        
++
+         # Initialize tray last, after all UI elements are created
+         self.setup_tray()
+-        
++
+         # Then load saved settings into existing fields
+         self.load_saved_settings()
+-        
++
+         # Check for updates
+         self.check_for_updates()
+-        
++
+     def setup_error_handling(self):
+         """Initialize error handling system."""
+         log_dir = Path(self.config.get('logging', {}).get('directory', 'logs'))
+         self.error_tracker = ErrorTracker(log_dir)
+-        
++
+     def setup_memory_management(self):
+         """Initialize memory management system."""
+         memory_limit = self.config.get('system', {}).get('memory_limit', None)
+         self.memory_manager = MemoryManager(memory_limit)
+-        
++
+         # Register caches if needed
+         self.memory_manager.register_cache('backup_cache', {}, 1000)
+-        
++
+     def setup_recovery(self):
+         """Initialize recovery system."""
+         backup_dir = Path(self.config.get('backup', {}).get('directory', 'backups'))
+         self.recovery = AutomaticRecovery(backup_dir)
+-        
++
+         # Start health monitoring
+         self.recovery.start_monitoring(self.handle_health_warning)
+-        
++
+         # Setup signal handlers
+         self.recovery.setup_signal_handlers()
+-        
++
+         # Try to load previous state
+         self.load_previous_state()
+-        
++
+     def handle_health_warning(self, warning: str):
+         """Handle system health warnings."""
+         self.tray_manager.set_state('warning', warning)
+@@ -459,7 +466,7 @@ class MainWindow(QMainWindow):
+             warning,
+             QMessageBox.StandardButton.Ok
+         )
+-        
++
+     def load_previous_state(self):
+         """Try to load and restore previous backup state."""
+         state = self.recovery.crash_recovery.load_state()
+@@ -478,58 +485,58 @@ class MainWindow(QMainWindow):
+                 if 'dest_path' in state:
+                     self.dest_path.setText(state['dest_path'])
+                 # Add more state restoration as needed
+-                
++
+     def setup_tray(self):
+         """Initialize system tray icon."""
+         if not QSystemTrayIcon.isSystemTrayAvailable():
+             logger.warning("System tray is not available")
+             return
+-            
++
+         self.tray_manager = TrayManager(self)
+-        
++
+         # Connect tray signals
+         self.tray_manager.show_window.connect(self.show_and_activate)
+         self.tray_manager.start_backup.connect(self.start_backup_from_tray)
+         self.tray_manager.stop_backup.connect(self.cancel_backup)
+         self.tray_manager.quit_app.connect(self.quit_application)
+-        
++
+     def show_and_activate(self):
+         """Show and activate the window."""
+         self.show()
+         self.activateWindow()
+         self.raise_()
+-        
++
+     def start_backup_from_tray(self):
+         """Start backup from tray without showing window."""
+         if not self.scanning and not self.backing_up:
+             self.start_backup()
+-            
++
+     def setup_ui(self):
+-        """Initialize and setup the user interface."""
++        """Initialize and set up the user interface."""
+         self.setWindowTitle("Backup Tool")
+         self.setFixedSize(
+             self.config['interface']['window_size']['width'],
+             self.config['interface']['window_size']['height']
+         )
+-        
++
+         # Main widget and layout
+         main_widget = QWidget()
+         self.setCentralWidget(main_widget)
+         layout = QVBoxLayout(main_widget)
+-        
++
+         # Setup UI components
+         self._setup_paths_group(layout)
+         self._setup_options_group(layout)
+         self._setup_progress_group(layout)
+         self._setup_buttons(layout)
+-        
++
+         self.apply_theme()
+-        
++
+     def _setup_paths_group(self, layout: QVBoxLayout):
+-        """Setup the paths group box."""
++        """Set up the paths group box."""
+         paths_group = QGroupBox("Paths")
+         paths_layout = QVBoxLayout()
+-        
++
+         # Source path
+         source_layout = QHBoxLayout()
+         self.source_path = QLineEdit()
+@@ -539,7 +546,7 @@ class MainWindow(QMainWindow):
+         source_layout.addWidget(QLabel("Source:"))
+         source_layout.addWidget(self.source_path)
+         source_layout.addWidget(self.source_browse)
+-        
++
+         # Destination path
+         dest_layout = QHBoxLayout()
+         self.dest_path = QLineEdit()
+@@ -549,29 +556,29 @@ class MainWindow(QMainWindow):
+         dest_layout.addWidget(QLabel("Destination:"))
+         dest_layout.addWidget(self.dest_path)
+         dest_layout.addWidget(self.dest_browse)
+-        
++
+         paths_layout.addLayout(source_layout)
+         paths_layout.addLayout(dest_layout)
+         paths_group.setLayout(paths_layout)
+         layout.addWidget(paths_group)
+-        
++
+     def _on_path_changed(self):
+         """Handle path text changes."""
+         self.save_settings()
+-        
++
+     def _setup_options_group(self, layout: QVBoxLayout):
+-        """Setup the options group box."""
++        """Set up the options group box."""
+         options_group = QGroupBox("Options")
+         options_layout = QVBoxLayout()
+-        
++
+         # Auto mode and verify mode
+         self.auto_mode = QCheckBox("Auto mode (skip confirmations)")
+         self.auto_mode.stateChanged.connect(lambda: self.save_settings())
+-        
++
+         self.verify_mode = QCheckBox("Verify files after copy")
+         self.verify_mode.setChecked(self.config['backup']['verify_after_copy'])
+         self.verify_mode.stateChanged.connect(lambda: self.save_settings())
+-        
++
+         # Buffer size selection
+         buffer_layout = QHBoxLayout()
+         buffer_layout.addWidget(QLabel("Buffer size:"))
+@@ -584,11 +591,11 @@ class MainWindow(QMainWindow):
+             ("8 MB (for NVMe SSDs)", 8 * 1024 * 1024),
+             ("16 MB (for high-end NVMe SSDs, fast RAID arrays)", 16 * 1024 * 1024)
+         ]
+-        
++
+         # Add all options to combobox
+         for label, size in buffer_sizes:
+             self.buffer_size.addItem(label, size)
+-        
++
+         # Set current buffer size from config
+         current_size = self.config['backup'].get('chunk_size', 1024 * 1024)  # 1MB default if not set
+         index = self.buffer_size.findData(current_size)
+@@ -599,11 +606,11 @@ class MainWindow(QMainWindow):
+             custom_label = f"{format_size(current_size)} (custom)"
+             self.buffer_size.addItem(custom_label, current_size)
+             self.buffer_size.setCurrentIndex(self.buffer_size.count() - 1)
+-        
++
+         self.buffer_size.setToolTip("Select buffer size based on your drive type")
+         self.buffer_size.currentIndexChanged.connect(self._buffer_size_changed)
+         buffer_layout.addWidget(self.buffer_size)
+-        
++
+         # Add exclusion patterns
+         exclude_layout = QHBoxLayout()
+         self.exclude_patterns = QLineEdit()
+@@ -613,34 +620,34 @@ class MainWindow(QMainWindow):
+             self.exclude_patterns.setText(','.join(self.config['backup']['exclude_patterns']))
+         exclude_layout.addWidget(QLabel("Exclude:"))
+         exclude_layout.addWidget(self.exclude_patterns)
+-        
++
+         options_layout.addWidget(self.auto_mode)
+         options_layout.addWidget(self.verify_mode)
+         options_layout.addLayout(buffer_layout)
+         options_layout.addLayout(exclude_layout)
+         options_group.setLayout(options_layout)
+         layout.addWidget(options_group)
+-        
++
+     def _buffer_size_changed(self):
+         """Handle buffer size change."""
+         new_size = self.buffer_size.currentData()
+         self.config['backup']['chunk_size'] = new_size
+         self.save_settings()
+-        
++
+     def _setup_progress_group(self, layout: QVBoxLayout):
+-        """Setup the progress group box."""
++        """Set up the progress group box."""
+         progress_group = QGroupBox("Progress")
+         progress_layout = QVBoxLayout()
+-        
++
+         # Progress bar with percentage
+         progress_bar_layout = QHBoxLayout()
+         self.progress_bar = AnimatedProgressBar()
+         progress_bar_layout.addWidget(self.progress_bar)
+-        
++
+         # Status label
+         self.status_label = QLabel(READY_MSG)
+         self.status_label.setWordWrap(False)
+-        
++
+         # Stats layout
+         stats_layout = QHBoxLayout()
+         self.speed_label = QLabel("")
+@@ -653,7 +660,7 @@ class MainWindow(QMainWindow):
+         stats_layout.addWidget(self.max_speed_label)
+         stats_layout.addWidget(self.eta_label)
+         stats_layout.addWidget(self.size_label)
+-        
++
+         # Current file frame
+         current_file_frame = QGroupBox("Current File")
+         current_file_layout = QVBoxLayout()
+@@ -663,28 +670,28 @@ class MainWindow(QMainWindow):
+         current_file_layout.addWidget(self.current_file_label)
+         current_file_layout.addWidget(self.file_size_label)
+         current_file_frame.setLayout(current_file_layout)
+-        
++
+         progress_layout.addLayout(progress_bar_layout)
+         progress_layout.addWidget(self.status_label)
+         progress_layout.addLayout(stats_layout)
+         progress_layout.addWidget(current_file_frame)
+         progress_group.setLayout(progress_layout)
+         layout.addWidget(progress_group)
+-        
++
+     def _setup_buttons(self, layout: QVBoxLayout):
+-        """Setup the action buttons."""
++        """Set up the action buttons."""
+         button_layout = QHBoxLayout()
+         self.start_button = QPushButton("Start Backup")
+         self.start_button.clicked.connect(self.start_backup)
+-        
++
+         self.cancel_button = QPushButton("Cancel")
+         self.cancel_button.clicked.connect(self.cancel_backup)
+         self.cancel_button.setEnabled(False)
+-        
++
+         button_layout.addWidget(self.start_button)
+         button_layout.addWidget(self.cancel_button)
+         layout.addLayout(button_layout)
+-        
++
+     def apply_theme(self):
+         """Apply the current theme to the UI."""
+         if self.config['interface']['dark_mode']:
+@@ -726,7 +733,7 @@ class MainWindow(QMainWindow):
+                     padding: 2px;
+                 }}
+             """)
+-            
++
+     def browse_path(self, path_type: str):
+         """Open file dialog to browse for a directory.
+         
+@@ -736,7 +743,7 @@ class MainWindow(QMainWindow):
+         dialog = QFileDialog(self)
+         dialog.setFileMode(QFileDialog.FileMode.Directory)
+         dialog.setOption(QFileDialog.Option.ShowDirsOnly, True)
+-        
++
+         if dialog.exec() == QFileDialog.DialogCode.Accepted:
+             selected = dialog.selectedFiles()[0]
+             if path_type == "source":
+@@ -745,79 +752,79 @@ class MainWindow(QMainWindow):
+                 self.dest_path.setText(selected)
+             # Save settings when paths are changed
+             self.save_settings()
+-                
++
+     def start_backup(self):
+         """Start the backup process with resource checks."""
+         if self.scanning or self.backing_up:
+             return
+-            
++
+         # Check system resources before starting
+         if not self.check_system_resources():
+             return
+-            
++
+         source = self.source_path.text().strip()
+         dest = self.dest_path.text().strip()
+-        
++
+         if not source or not dest:
+             self.handle_error(
+                 ConfigurationError("Please select both paths"),
+                 {'source': source, 'dest': dest}
+             )
+             return
+-            
++
+         try:
+             # Configure backup manager
+             self.backup_manager.source_path = source
+             self.backup_manager.dest_path = dest
+-            
++
+             # Set exclude patterns
+             patterns = [p.strip() for p in self.exclude_patterns.text().split(',') if p.strip()]
+             self.backup_manager.set_exclude_patterns(patterns)
+-            
++
+             # Disable UI during scan
+             self.scanning = True
+             self.update_ui_state()
+             self.status_label.setText(f"{SCANNING_MSG}...")
+             self.progress_bar.setValue(0)
+-            
++
+             # Start scan thread
+             self.scan_thread = ScanThread(self.backup_manager, source, dest)
+             self.scan_thread.status.connect(self.update_status)
+             self.scan_thread.current_file.connect(self.update_current_file)
+             self.scan_thread.finished.connect(self.scan_finished)
+             self.scan_thread.start()
+-            
++
+         except Exception as e:
+             self.handle_error(e, {
+                 'source': source,
+                 'dest': dest,
+                 'patterns': patterns
+             })
+-        
++
+     def scan_finished(self, success: bool, message: str, differences: Dict):
+         """Handle scan completion."""
+         self.scanning = False
+-        
++
+         if not success:
+             self.update_ui_state()
+             QMessageBox.critical(self, "Error", message)
+             return
+-            
++
+         # Show confirmation dialog
+         if not self.auto_mode.isChecked():
+             total_files = len(differences['to_copy']) + len(differences['to_update'])
+             status_msg = f"Files to process: {total_files}\n{message}"
+             self.status_label.setText(status_msg)
+-            
++
+             dialog = PathVerificationDialog(differences, self)
+             if dialog.exec() != QMessageBox.DialogCode.Accepted:
+                 self.update_ui_state()
+                 return
+-                
++
+         # Start backup
+         self.backing_up = True
+         self.update_ui_state()
+-        
++
+         self.backup_thread = BackupThread(self.backup_manager, differences)
+         self.backup_thread.progress.connect(self.update_progress)
+         self.backup_thread.status.connect(self.update_status)
+@@ -825,7 +832,7 @@ class MainWindow(QMainWindow):
+         self.backup_thread.stats_update.connect(self.update_stats)
+         self.backup_thread.finished.connect(self.backup_finished)
+         self.backup_thread.start()
+-        
++
+     def cancel_backup(self):
+         """Handle backup cancellation."""
+         if self.scanning or self.backing_up:
+@@ -838,7 +845,7 @@ class MainWindow(QMainWindow):
+             )
+             if reply == QMessageBox.StandardButton.No:
+                 return
+-            
++
+             if self.scanning:
+                 self.scan_thread.terminate()
+                 self.scan_thread.wait()
+@@ -846,10 +853,10 @@ class MainWindow(QMainWindow):
+             else:
+                 self.backup_manager.stop()
+                 self.backup_thread.wait()
+-            
++
+             self.update_ui_state()
+             self.status_label.setText(BACKUP_CANCELLED_MSG)
+-        
++
+     def update_progress(self, value: float):
+         """Update progress bar value.
+         
+@@ -857,11 +864,11 @@ class MainWindow(QMainWindow):
+             value: Progress percentage (0-100)
+         """
+         self.progress_bar.setValue(int(value))
+-        
++
+     def update_status(self, message: str):
+         """Update status label text and tray tooltip."""
+         self.status_label.setText(message)
+-        
++
+         # Update tray state based on message
+         if self.backing_up:
+             self.tray_manager.set_state('backup', message)
+@@ -871,16 +878,16 @@ class MainWindow(QMainWindow):
+             self.tray_manager.set_state('warning', message)
+         else:
+             self.tray_manager.set_state('waiting', message)
+-            
++
+     def backup_finished(self, success: bool, message: str, stats: Dict = None):
+         """Handle backup completion."""
+         self.backing_up = False
+         self.update_ui_state()
+-        
++
+         if not success:
+             QMessageBox.critical(self, "Error", message)
+             return
+-            
++
+         if stats and stats.get('errors', 0) > 0:
+             error_msg = f"Backup completed with {stats['errors']} errors"
+             QMessageBox.warning(
+@@ -889,13 +896,13 @@ class MainWindow(QMainWindow):
+                 error_msg,
+                 QMessageBox.StandardButton.Ok
+             )
+-            
++
+         self.status_label.setText(message)
+         self.progress_bar.setValue(100)
+-        
++
+         # Save settings after backup completion
+         self.save_settings()
+-            
++
+     def update_ui_state(self):
+         """Update UI elements based on current state."""
+         enabled = not (self.scanning or self.backing_up)
+@@ -909,13 +916,13 @@ class MainWindow(QMainWindow):
+         self.exclude_patterns.setEnabled(enabled)
+         self.buffer_size.setEnabled(enabled)
+         self.cancel_button.setEnabled(not enabled)
+-        
++
+         # Update tray state
+         if not enabled:
+             self.tray_manager.set_state('backup', "Backup in progress...")
+         else:
+             self.tray_manager.set_state('waiting', READY_MSG)
+-            
++
+         # Clear stats when not backing up
+         if enabled:
+             self.speed_label.setText("")
+@@ -926,7 +933,7 @@ class MainWindow(QMainWindow):
+             self.current_file_label.setText("")
+             self.file_size_label.setText("")
+             self.progress_bar.setValue(0)
+-        
++
+     def update_current_file(self, file_path: str, size: Optional[str] = None):
+         """Update current file being processed.
+         
+@@ -938,7 +945,7 @@ class MainWindow(QMainWindow):
+         self.current_file_label.setText(truncated_path)
+         if size:
+             self.file_size_label.setText(f"Size: {size}")
+-        
++
+     def update_stats(self, stats: Dict[str, str]):
+         """Update statistics labels.
+         
+@@ -951,36 +958,36 @@ class MainWindow(QMainWindow):
+         self.eta_label.setText(stats['eta'])
+         self.size_label.setText(stats['processed_size'])
+         self.progress_bar.setValue(int(stats['percent']))
+-        
++
+     def load_saved_settings(self):
+         """Load saved settings from config."""
+         # Load exclude patterns from backup config
+         if 'exclude_patterns' in self.config['backup']:
+             self.exclude_patterns.setText(','.join(self.config['backup']['exclude_patterns']))
+-        
++
+         # Load other settings
+         if 'auto_mode' in self.config:
+             self.auto_mode.setChecked(self.config['auto_mode'])
+         if 'verify_after_copy' in self.config['backup']:
+             self.verify_mode.setChecked(self.config['backup']['verify_after_copy'])
+-        
++
+     def save_settings(self):
+         """Save current settings to config."""
+         # Save exclude patterns to backup config
+         patterns = [p.strip() for p in self.exclude_patterns.text().split(',') if p.strip()]
+         self.config['backup']['exclude_patterns'] = patterns
+-        
++
+         # Save other settings
+         self.config['auto_mode'] = self.auto_mode.isChecked()
+         self.config['backup']['verify_after_copy'] = self.verify_mode.isChecked()
+-        
++
+         # Save config to file
+         try:
+             with open(self.config_path, 'w', encoding='utf-8') as f:
+                 json.dump(self.config, f, indent=4)
+         except Exception as e:
+             QMessageBox.warning(self, "Warning", f"Failed to save settings: {e}")
+-        
++
+     def closeEvent(self, event):
+         """Handle application close event."""
+         if self.scanning or self.backing_up:
+@@ -993,7 +1000,7 @@ class MainWindow(QMainWindow):
+                 "3. Use SHIFT + ESC for emergency force quit (may corrupt files!)\n\n"
+                 "Do you want to stop the current operation?"
+             )
+-            
++
+             reply = QMessageBox.warning(
+                 self,
+                 'Operation in Progress',
+@@ -1001,7 +1008,7 @@ class MainWindow(QMainWindow):
+                 QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No,
+                 QMessageBox.StandardButton.No
+             )
+-            
++
+             if reply == QMessageBox.StandardButton.Yes:
+                 # User chose to stop the operation
+                 if self.scanning:
+@@ -1021,7 +1028,7 @@ class MainWindow(QMainWindow):
+                     # Wait for backup thread to finish
+                     self.backup_thread.wait()
+                     please_wait.close()
+-                    
++
+                 # Show final warning
+                 final_msg = (
+                     "Operation has been stopped.\n"
+@@ -1035,7 +1042,7 @@ class MainWindow(QMainWindow):
+                     QMessageBox.StandardButton.Ok | QMessageBox.StandardButton.Cancel,
+                     QMessageBox.StandardButton.Cancel
+                 )
+-                
++
+                 if final_reply == QMessageBox.StandardButton.Cancel:
+                     event.ignore()
+                     return
+@@ -1043,16 +1050,16 @@ class MainWindow(QMainWindow):
+                 # User chose not to stop the operation
+                 event.ignore()
+                 return
+-        
++
+         # If we get here, either no operation was in progress or it was safely stopped
+-        
++
+         # Save current state and settings
+         self.save_settings()
+         self.save_current_state()
+-        
++
+         # If closing to tray is enabled and it's not a quit action
+-        if (self.config.get('tray', {}).get('actions', {}).get('close_to_tray', True) and 
+-            not self.quit_requested):
++        if (self.config.get('tray', {}).get('actions', {}).get('close_to_tray', True) and
++                not self.quit_requested):
+             self.hide()
+             # Show toast notification that app is minimized to tray
+             self.tray_manager.show_message(
+@@ -1064,17 +1071,17 @@ class MainWindow(QMainWindow):
+         else:
+             # Stop recovery monitoring
+             self.recovery.stop_monitoring()
+-            
++
+             # Clean up caches
+             self.memory_manager.clear_all_caches()
+-            
++
+             # Cleanup before exit
+             self.tray_manager.cleanup()
+             self.recovery.crash_recovery.cleanup_state()
+-            
++
+             # Accept the close event
+             event.accept()
+-            
++
+             # Ensure the application quits
+             QApplication.instance().quit()
+ 
+@@ -1089,7 +1096,7 @@ class MainWindow(QMainWindow):
+                 'timestamp': datetime.now().isoformat()
+             }
+             self.recovery.crash_recovery.save_state(state)
+-            
++
+     def handle_error(self, error: Exception, context: Dict[str, Any] = None):
+         """Handle application errors."""
+         self.error_tracker.handle_error(error, context)
+@@ -1100,7 +1107,7 @@ class MainWindow(QMainWindow):
+             str(error),
+             QMessageBox.StandardButton.Ok
+         )
+-        
++
+     def check_system_resources(self) -> bool:
+         """Check if system resources are sufficient."""
+         # Check memory usage
+@@ -1111,35 +1118,35 @@ class MainWindow(QMainWindow):
+                 {'memory_usage': self.memory_manager.get_memory_usage()}
+             )
+             return False
+-            
++
+         # Check system health
+         health_status = self.recovery.health_monitor.check_system_health()
+         if not health_status['is_healthy']:
+             for warning in health_status['warnings']:
+                 self.handle_health_warning(warning)
+             return False
+-            
++
+         return True
+-        
++
+     def setup_cleanup(self):
+         """Initialize cleanup manager."""
+         self.cleanup_manager = CleanupManager()
+-        
++
+     def quit_application(self):
+         """Handle application quit from tray menu."""
+         # Set quit flag
+         self.quit_requested = True
+-        
++
+         # Save and cleanup
+         self.save_settings()
+         self.save_current_state()
+         self.recovery.stop_monitoring()
+         self.memory_manager.clear_all_caches()
+         self.recovery.crash_recovery.cleanup_state()
+-        
++
+         # Run cleanup operations
+         self.cleanup_manager.cleanup_all()
+-        
++
+         # Close all windows and quit
+         QApplication.instance().closeAllWindows()
+         QApplication.instance().quit()
+@@ -1179,7 +1186,7 @@ class MainWindow(QMainWindow):
+                 )
+                 if reply == QMessageBox.StandardButton.No:
+                     return
+-                    
++
+             # Force quit without saving
+             self.tray_manager.cleanup()
+             # Run cleanup even in force quit
+@@ -1191,7 +1198,7 @@ class MainWindow(QMainWindow):
+     def setup_update_checker(self):
+         """Initialize update checker."""
+         self.update_checker = UpdateChecker()
+-        
++
+     def check_for_updates(self):
+         """Check for application updates."""
+         has_update, message = self.update_checker.check_for_updates()
+diff --git a/src/gui/tray_manager.py b/src/gui/tray_manager.py
+index 0362900..813d012 100644
+--- a/src/gui/tray_manager.py
++++ b/src/gui/tray_manager.py
+@@ -1,20 +1,22 @@
+-from PyQt6.QtWidgets import QSystemTrayIcon, QMenu, QApplication
+-from PyQt6.QtGui import QIcon
+-from PyQt6.QtCore import QObject, pyqtSignal
+-from pathlib import Path
+ import logging
++from pathlib import Path
++
++from PyQt6.QtCore import QObject, pyqtSignal
++from PyQt6.QtGui import QIcon
++from PyQt6.QtWidgets import QSystemTrayIcon, QMenu
+ 
+ logger = logging.getLogger(__name__)
+ 
++
+ class TrayManager(QObject):
+     """Manages system tray icon and its functionality."""
+-    
++
+     # Signals
+     show_window = pyqtSignal()  # Signal to show main window
+     start_backup = pyqtSignal()  # Signal to start backup
+     stop_backup = pyqtSignal()  # Signal to stop backup
+-    quit_app = pyqtSignal()     # Signal to quit application
+-    
++    quit_app = pyqtSignal()  # Signal to quit application
++
+     def __init__(self, parent=None):
+         super().__init__(parent)
+         self.tray_icon = None
+@@ -24,56 +26,56 @@ class TrayManager(QObject):
+         self.tray_icon = QSystemTrayIcon(parent)
+         self.tray_menu = QMenu()
+         self.setup_tray()
+-        
++
+     def setup_tray(self):
+         """Setup tray icon and menu."""
+         if not self.tray_icon or not self.tray_menu:
+             return
+-            
++
+         # Add menu actions
+         show_action = self.tray_menu.addAction("Show Window")
+         show_action.triggered.connect(self.show_window.emit)
+-        
++
+         self.tray_menu.addSeparator()
+-        
++
+         start_action = self.tray_menu.addAction("Start Backup")
+         start_action.triggered.connect(self.start_backup.emit)
+-        
++
+         stop_action = self.tray_menu.addAction("Stop Backup")
+         stop_action.triggered.connect(self.stop_backup.emit)
+         stop_action.setEnabled(False)
+         self.stop_action = stop_action
+-        
++
+         self.tray_menu.addSeparator()
+-        
++
+         quit_action = self.tray_menu.addAction("Exit")
+         quit_action.triggered.connect(self._quit_application)
+-        
++
+         # Set context menu
+         self.tray_icon.setContextMenu(self.tray_menu)
+-        
++
+         # Setup double click behavior
+         self.tray_icon.activated.connect(self._handle_tray_activation)
+-        
++
+         # Load default icon
+         self.set_state('waiting')
+-        
++
+         # Show tray icon
+         self.tray_icon.show()
+-        
++
+     def _handle_tray_activation(self, reason):
+         """Handle tray icon activation."""
+         # Only show window on double click
+         if reason == QSystemTrayIcon.ActivationReason.DoubleClick:
+             self.show_window.emit()
+-            
++
+     def _quit_application(self):
+         """Handle quit action from tray menu."""
+         # Hide tray icon immediately to prevent further interactions
+         self.cleanup()
+         # Emit quit signal
+         self.quit_app.emit()
+-        
++
+     def set_state(self, state: str, message: str = None):
+         """Set tray icon state and tooltip.
+         
+@@ -83,18 +85,18 @@ class TrayManager(QObject):
+         """
+         if not self.tray_icon:
+             return
+-            
++
+         # Get icon path
+         icon_path = Path(__file__).parent.parent / 'resources' / 'images' / 'trays'
+         icon_file = icon_path / f'tray_{state}.png'
+-        
++
+         if not icon_file.exists():
+             logger.error(f"Tray icon not found: {icon_file}")
+             return
+-            
++
+         # Set icon
+         self.tray_icon.setIcon(QIcon(str(icon_file)))
+-        
++
+         # Update tooltip
+         state_messages = {
+             'backup': 'Backup in progress...',
+@@ -102,19 +104,19 @@ class TrayManager(QObject):
+             'warning': 'Warning',
+             'waiting': 'Ready'
+         }
+-        
++
+         status = message if message else state_messages.get(state, 'Ready')
+         self.tray_icon.setToolTip(f"{self.app_name} - {status}")
+-            
++
+         # Update menu items
+         self.stop_action.setEnabled(state == 'backup')
+-        
++
+         # Update menu text based on state
+         if state == 'backup':
+             self.stop_action.setText("Stop Current Backup")
+         else:
+             self.stop_action.setText("Stop Backup")
+-        
++
+     def show_message(self, title: str, message: str, icon_type=QSystemTrayIcon.MessageIcon.Information):
+         """Show tray notification.
+         
+@@ -125,7 +127,7 @@ class TrayManager(QObject):
+         """
+         if self.tray_icon:
+             self.tray_icon.showMessage(title, message, icon_type)
+-        
++
+     def cleanup(self):
+         """Clean up tray icon before application exit."""
+         if self.tray_icon:
+@@ -135,4 +137,4 @@ class TrayManager(QObject):
+                 self.tray_menu.clear()
+                 self.tray_menu = None
+             self.tray_icon.deleteLater()
+-            self.tray_icon = None 
+\ No newline at end of file
++            self.tray_icon = None
+diff --git a/src/gui/widgets.py b/src/gui/widgets.py
+index 7a61a05..95fbb97 100644
+--- a/src/gui/widgets.py
++++ b/src/gui/widgets.py
+@@ -1,37 +1,38 @@
+-from PyQt6.QtWidgets import QProgressBar
+ from PyQt6.QtCore import QPropertyAnimation, QEasingCurve, Qt, pyqtProperty, QTimer
+ from PyQt6.QtGui import QColor
++from PyQt6.QtWidgets import QProgressBar
++
+ 
+ class AnimatedProgressBar(QProgressBar):
+     def __init__(self, parent=None):
+         super().__init__(parent)
+         self._color = QColor("#3498db")
+-        
++
+         # Setup animations
+         self.value_anim = QPropertyAnimation(self, b"value")
+         self.value_anim.setDuration(250)
+         self.value_anim.setEasingCurve(QEasingCurve.Type.OutCubic)
+-        
++
+         self.color_anim = QPropertyAnimation(self, b"color")
+         self.color_anim.setDuration(500)
+         self.color_anim.setEasingCurve(QEasingCurve.Type.InOutQuad)
+-        
++
+         # Setup update timer for smooth progress
+         self.update_timer = QTimer()
+         self.update_timer.setInterval(16)  # ~60 FPS
+         self.update_timer.timeout.connect(self.smooth_update)
+-        
++
+         self.target_value = 0
+         self.current_value = 0
+         self.smoothing_factor = 0.15
+-        
++
+         self.setAlignment(Qt.AlignmentFlag.AlignCenter)
+         self.setTextVisible(True)
+         self.setMinimum(0)
+         self.setMaximum(100)
+-        
++
+         self.apply_style()
+-        
++
+     def apply_style(self):
+         self.setStyleSheet(f"""
+             QProgressBar {{
+@@ -46,7 +47,7 @@ class AnimatedProgressBar(QProgressBar):
+                 border-radius: 4px;
+             }}
+         """)
+-        
++
+     def smooth_update(self):
+         """Update progress smoothly"""
+         if abs(self.target_value - self.current_value) < 0.1:
+@@ -54,31 +55,31 @@ class AnimatedProgressBar(QProgressBar):
+             self.update_timer.stop()
+         else:
+             self.current_value += (self.target_value - self.current_value) * self.smoothing_factor
+-            
++
+         super().setValue(round(self.current_value))
+-        
++
+     def setValue(self, value):
+         """Set progress value with smooth animation"""
+         self.target_value = value
+         if not self.update_timer.isActive():
+             self.update_timer.start()
+-        
++
+     def set_color(self, color):
+         """Set progress bar color"""
+         if isinstance(color, str):
+             color = QColor(color)
+         self._color = color
+         self.apply_style()
+-        
++
+     def get_color(self):
+         """Get current progress bar color"""
+         return self._color
+-        
++
+     # Define the color property
+     color = pyqtProperty(QColor, get_color, set_color)
+-    
++
+     def setColor(self, color):
+         """Set color with animation"""
+         self.color_anim.setStartValue(self._color)
+         self.color_anim.setEndValue(QColor(color))
+-        self.color_anim.start() 
+\ No newline at end of file
++        self.color_anim.start()
+diff --git a/src/main.py b/src/main.py
+index c4d2323..9c7fb8d 100644
+--- a/src/main.py
++++ b/src/main.py
+@@ -1,32 +1,33 @@
+-import sys
+ import logging
++import sys
+ from pathlib import Path
+-from PyQt6.QtWidgets import QApplication, QSystemTrayIcon
++
+ from PyQt6.QtGui import QIcon
+-from PyQt6.QtCore import Qt
++from PyQt6.QtWidgets import QApplication, QSystemTrayIcon
+ 
+ from .gui.main_window import MainWindow
+-from .utils.logger import setup_logger
+ from .utils.config import load_config
++from .utils.logger import setup_logger
++
+ 
+ def main():
+     try:
+         # Load configuration
+         config, config_path = load_config()
+-        
++
+         # Setup logger
+         log_dir = Path(config.get('logging', {}).get('directory', 'logs'))
+         logger = setup_logger(log_dir)
+         logger.info("Starting backup application")
+-        
++
+         # Create Qt application
+         app = QApplication(sys.argv)
+-        
++
+         # Ensure application doesn't quit when last window is closed
+         # but only if system tray is available
+         if QSystemTrayIcon.isSystemTrayAvailable():
+             app.setQuitOnLastWindowClosed(False)
+-        
++
+         # Check if system tray is supported
+         if not QSystemTrayIcon.isSystemTrayAvailable():
+             logger.warning("System tray is not available")
+@@ -35,19 +36,19 @@ def main():
+             config['tray']['actions']['close_to_tray'] = False
+             # If tray is not available, make sure app quits on window close
+             app.setQuitOnLastWindowClosed(True)
+-        
++
+         # Set application style and icon
+         if config.get('interface', {}).get('dark_mode', True):
+             app.setStyle('Fusion')
+-        
++
+         icon_path = Path(__file__).parent / 'resources' / 'images' / 'icon.png'
+         if icon_path.exists():
+             app_icon = QIcon(str(icon_path))
+             app.setWindowIcon(app_icon)
+-        
++
+         # Create main window
+         window = MainWindow(config, config_path)
+-        
++
+         # Show window based on configuration
+         if config.get('tray', {}).get('actions', {}).get('start_minimized', False):
+             if config['interface']['minimize_to_tray']:
+@@ -57,17 +58,18 @@ def main():
+                 window.showMinimized()
+         else:
+             window.show()
+-        
++
+         # Start application event loop
+         exit_code = app.exec()
+-        
++
+         # Ensure proper cleanup
+         app.quit()
+         return exit_code
+-        
++
+     except Exception as e:
+         logging.critical(f"Application failed to start: {e}", exc_info=True)
+         return 1
+ 
++
+ if __name__ == '__main__':
+-    sys.exit(main()) 
+\ No newline at end of file
++    sys.exit(main())
+diff --git a/src/utils/__init__.py b/src/utils/__init__.py
+index ad09628..1f8893a 100644
+--- a/src/utils/__init__.py
++++ b/src/utils/__init__.py
+@@ -1 +1 @@
+-"""Utility modules for the Backup Tool.""" 
+\ No newline at end of file
++"""Utility modules for the Backup Tool."""
+diff --git a/src/utils/cleanup.py b/src/utils/cleanup.py
+index 7ee3e9a..727cce1 100644
+--- a/src/utils/cleanup.py
++++ b/src/utils/cleanup.py
+@@ -1,32 +1,32 @@
+ """Module for cleaning up temporary files and caches."""
++import logging
+ import os
+ import shutil
+-import logging
+-import tempfile
+ import time
+ from pathlib import Path
+-from typing import List, Set
++from typing import Set
+ 
+ logger = logging.getLogger(__name__)
+ 
++
+ class CleanupManager:
+     """Manages cleanup operations for the application."""
+-    
++
+     # File patterns to clean up
+     TEMP_FILE_PATTERNS = [
+-        '*.pyc',        # Python compiled files
+-        '*.pyo',        # Python optimized files
+-        '*.pyd',        # Python dynamic modules
+-        '*.log',        # Log files
+-        '*.tmp',        # Temporary files
+-        '*.bak',        # Backup files
+-        '*.swp',        # Vim swap files
+-        '*.~*',         # Backup files
+-        '*.cache',      # Cache files
+-        '.DS_Store',    # macOS system files
+-        'Thumbs.db'     # Windows thumbnail cache
++        '*.pyc',  # Python compiled files
++        '*.pyo',  # Python optimized files
++        '*.pyd',  # Python dynamic modules
++        '*.log',  # Log files
++        '*.tmp',  # Temporary files
++        '*.bak',  # Backup files
++        '*.swp',  # Vim swap files
++        '*.~*',  # Backup files
++        '*.cache',  # Cache files
++        '.DS_Store',  # macOS system files
++        'Thumbs.db'  # Windows thumbnail cache
+     ]
+-    
++
+     def __init__(self, base_dir: Path = None):
+         """Initialize cleanup manager.
+         
+@@ -37,7 +37,7 @@ class CleanupManager:
+             base_dir = Path(__file__).parent.parent
+         self.base_dir = base_dir
+         self._temp_dirs: Set[Path] = set()
+-        
++
+     def register_temp_dir(self, path: Path):
+         """Register a temporary directory for cleanup.
+         
+@@ -46,7 +46,7 @@ class CleanupManager:
+         """
+         self._temp_dirs.add(path)
+         logger.debug(f"Registered temporary directory: {path}")
+-        
++
+     def remove_pycache(self) -> int:
+         """Remove all __pycache__ directories in the project.
+         
+@@ -65,14 +65,14 @@ class CleanupManager:
+                             logger.info(f"Removed __pycache__ directory: {cache_path}")
+                         except Exception as e:
+                             logger.error(f"Failed to remove {cache_path}: {e}")
+-            
++
+             logger.info(f"Removed {removed_count} __pycache__ directories")
+             return removed_count
+-            
++
+         except Exception as e:
+             logger.error(f"Error while removing __pycache__ directories: {e}")
+             return 0
+-            
++
+     def clean_temp_files(self) -> int:
+         """Remove temporary files based on patterns.
+         
+@@ -90,14 +90,14 @@ class CleanupManager:
+                             logger.info(f"Removed temporary file: {file}")
+                         except Exception as e:
+                             logger.error(f"Failed to remove {file}: {e}")
+-                            
++
+             logger.info(f"Removed {removed_count} temporary files")
+             return removed_count
+-            
++
+         except Exception as e:
+             logger.error(f"Error while removing temporary files: {e}")
+             return 0
+-            
++
+     def clean_empty_dirs(self) -> int:
+         """Remove empty directories.
+         
+@@ -114,14 +114,14 @@ class CleanupManager:
+                         logger.info(f"Removed empty directory: {root}")
+                     except Exception as e:
+                         logger.error(f"Failed to remove empty directory {root}: {e}")
+-                        
++
+             logger.info(f"Removed {removed_count} empty directories")
+             return removed_count
+-            
++
+         except Exception as e:
+             logger.error(f"Error while removing empty directories: {e}")
+             return 0
+-            
++
+     def clean_temp_dirs(self) -> int:
+         """Remove registered temporary directories.
+         
+@@ -138,10 +138,10 @@ class CleanupManager:
+                 self._temp_dirs.remove(temp_dir)
+             except Exception as e:
+                 logger.error(f"Failed to remove temporary directory {temp_dir}: {e}")
+-                
++
+         logger.info(f"Removed {removed_count} temporary directories")
+         return removed_count
+-        
++
+     def clean_old_logs(self, max_age_days: int = 30) -> int:
+         """Remove log files older than specified days.
+         
+@@ -155,7 +155,7 @@ class CleanupManager:
+         log_dir = self.base_dir / 'logs'
+         if not log_dir.exists():
+             return 0
+-            
++
+         try:
+             current_time = time.time()
+             for log_file in log_dir.glob('*.log'):
+@@ -166,31 +166,31 @@ class CleanupManager:
+                         logger.info(f"Removed old log file: {log_file}")
+                     except Exception as e:
+                         logger.error(f"Failed to remove log file {log_file}: {e}")
+-                        
++
+             logger.info(f"Removed {removed_count} old log files")
+             return removed_count
+-            
++
+         except Exception as e:
+             logger.error(f"Error while removing old log files: {e}")
+             return 0
+-            
++
+     def cleanup_all(self):
+         """Perform all cleanup operations."""
+         logger.info("Starting cleanup operations...")
+-        
++
+         # Remove __pycache__ directories
+         self.remove_pycache()
+-        
++
+         # Clean temporary files
+         self.clean_temp_files()
+-        
++
+         # Clean temporary directories
+         self.clean_temp_dirs()
+-        
++
+         # Clean empty directories
+         self.clean_empty_dirs()
+-        
++
+         # Clean old log files (older than 30 days)
+         self.clean_old_logs()
+-        
+-        logger.info("Cleanup operations completed") 
+\ No newline at end of file
++
++        logger.info("Cleanup operations completed")
+diff --git a/src/utils/config.py b/src/utils/config.py
+index 5183416..ce4ac3a 100644
+--- a/src/utils/config.py
++++ b/src/utils/config.py
+@@ -39,6 +39,7 @@ DEFAULT_CONFIG = {
+     }
+ }
+ 
++
+ def deep_merge(default: Dict, user: Dict) -> Dict:
+     """Deep merge two dictionaries.
+     
+@@ -57,6 +58,7 @@ def deep_merge(default: Dict, user: Dict) -> Dict:
+             result[key] = value
+     return result
+ 
++
+ def load_config() -> Tuple[Dict, str]:
+     """Load configuration from file or create default.
+     
+@@ -66,7 +68,7 @@ def load_config() -> Tuple[Dict, str]:
+             - config_path: Path to the configuration file
+     """
+     config_path = Path('config.json')
+-    
++
+     try:
+         if config_path.exists():
+             with config_path.open('r') as f:
+@@ -78,7 +80,7 @@ def load_config() -> Tuple[Dict, str]:
+             with config_path.open('w') as f:
+                 json.dump(DEFAULT_CONFIG, f, indent=4)
+             return DEFAULT_CONFIG, str(config_path.absolute())
+-            
++
+     except Exception as e:
+         print(f"Error loading config: {e}")
+-        return DEFAULT_CONFIG, str(config_path.absolute()) 
+\ No newline at end of file
++        return DEFAULT_CONFIG, str(config_path.absolute())
+diff --git a/src/utils/error_handler.py b/src/utils/error_handler.py
+index 6b9ece2..5090b99 100644
+--- a/src/utils/error_handler.py
++++ b/src/utils/error_handler.py
+@@ -2,16 +2,18 @@
+ 
+ import json
+ import logging
++import platform
+ import traceback
+ from dataclasses import dataclass, asdict
+ from datetime import datetime
+ from pathlib import Path
+ from typing import Dict, Any, List, Optional
++
+ import psutil
+-import platform
+ 
+ logger = logging.getLogger(__name__)
+ 
++
+ @dataclass
+ class ErrorReport:
+     """Data structure for error reporting."""
+@@ -22,28 +24,34 @@ class ErrorReport:
+     system_info: Dict
+     context: Optional[Dict] = None
+ 
++
+ class BackupError(Exception):
+     """Base exception for backup operations."""
++
+     def __init__(self, message: str, context: Dict[str, Any] = None):
+         super().__init__(message)
+         self.context = context or {}
+         self.timestamp = datetime.now().isoformat()
+ 
++
+ class FileOperationError(BackupError):
+     """Exception for file operation failures."""
+     pass
+ 
++
+ class NetworkError(BackupError):
+     """Exception for network-related failures."""
+     pass
+ 
++
+ class ConfigurationError(BackupError):
+     """Exception for configuration-related errors."""
+     pass
+ 
++
+ class ErrorTracker:
+     """Tracks and manages error reporting."""
+-    
++
+     def __init__(self, log_dir: Path):
+         """Initialize error tracker.
+         
+@@ -52,7 +60,7 @@ class ErrorTracker:
+         """
+         self.log_dir = Path(log_dir)
+         self.log_dir.mkdir(parents=True, exist_ok=True)
+-        
++
+     def create_error_report(self, error: Exception, context: Dict[str, Any] = None) -> ErrorReport:
+         """Create structured error report.
+         
+@@ -76,7 +84,7 @@ class ErrorTracker:
+                 }
+             except Exception as e:
+                 logger.warning(f"Could not get disk usage for {disk.mountpoint}: {e}")
+-                
++
+         # Create system info dictionary
+         system_info = {
+             'platform': platform.platform(),
+@@ -85,7 +93,7 @@ class ErrorTracker:
+             'disk_usage': disk_usage,
+             'cpu_percent': psutil.cpu_percent(interval=1)
+         }
+-        
++
+         return ErrorReport(
+             timestamp=datetime.now().isoformat(),
+             error_type=error.__class__.__name__,
+@@ -94,7 +102,7 @@ class ErrorTracker:
+             system_info=system_info,
+             context=context
+         )
+-        
++
+     def handle_error(self, error: Exception, context: Dict[str, Any] = None):
+         """Handle and log an error.
+         
+@@ -105,26 +113,26 @@ class ErrorTracker:
+         try:
+             # Create error report
+             report = self.create_error_report(error, context)
+-            
++
+             # Save to JSON file
+             timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+             error_file = self.log_dir / f"error_{timestamp}.json"
+-            
++
+             with open(error_file, 'w') as f:
+                 json.dump(asdict(report), f, indent=2)
+-                
++
+             logger.error(f"Error report saved to {error_file}")
+-            
++
+             # Log the error
+             logger.error(f"Error occurred: {error}")
+             if context:
+                 logger.error(f"Error context: {context}")
+             logger.error(report.traceback)
+-            
++
+         except Exception as e:
+             logger.error(f"Failed to handle error: {e}")
+             logger.error(traceback.format_exc())
+-            
++
+     def get_recent_errors(self, limit: int = 10) -> list:
+         """Get most recent error reports.
+         
+@@ -140,7 +148,7 @@ class ErrorTracker:
+                 key=lambda x: x.stat().st_mtime,
+                 reverse=True
+             )[:limit]
+-            
++
+             reports = []
+             for file in error_files:
+                 try:
+@@ -148,23 +156,24 @@ class ErrorTracker:
+                         reports.append(json.load(f))
+                 except Exception as e:
+                     logger.error(f"Failed to read error report {file}: {e}")
+-                    
++
+             return reports
+-            
++
+         except Exception as e:
+             logger.error(f"Failed to get recent errors: {e}")
+             return []
+ 
++
+ def get_last_error_reports(log_dir: Path, count: int = 5) -> List[ErrorReport]:
+     """Retrieve the most recent error reports."""
+     error_dir = log_dir / 'error_reports'
+     if not error_dir.exists():
+         return []
+-    
++
+     reports = []
+     for file in sorted(error_dir.glob('error_*.json'), reverse=True)[:count]:
+         with file.open('r', encoding='utf-8') as f:
+             data = json.load(f)
+             reports.append(ErrorReport(**data))
+-    
+-    return reports 
+\ No newline at end of file
++
++    return reports
+diff --git a/src/utils/exclusion_rules.py b/src/utils/exclusion_rules.py
+index 97b19d3..e9c2c78 100644
+--- a/src/utils/exclusion_rules.py
++++ b/src/utils/exclusion_rules.py
+@@ -1,8 +1,8 @@
++import fnmatch
++import logging
+ import re
+ from pathlib import Path
+ from typing import List, Dict, Union, Optional
+-import fnmatch
+-import logging
+ 
+ logger = logging.getLogger(__name__)
+ 
+@@ -53,7 +53,7 @@ class ExclusionRules:
+         logger.debug(f"Added exclusion pattern: {pattern}")
+ 
+     def add_size_limit(
+-        self, min_size: Optional[int] = None, max_size: Optional[int] = None
++            self, min_size: Optional[int] = None, max_size: Optional[int] = None
+     ):
+         """Set size limits for file exclusion.
+ 
+diff --git a/src/utils/helpers.py b/src/utils/helpers.py
+index 5c45116..c221937 100644
+--- a/src/utils/helpers.py
++++ b/src/utils/helpers.py
+@@ -1,20 +1,24 @@
+-import psutil
++from datetime import datetime
+ from pathlib import Path
+ from typing import Dict, Optional
+-from datetime import datetime
++
++import psutil
++
+ 
+ def get_free_space(path: Path) -> int:
+     """Get free space in bytes for the given path."""
+     return psutil.disk_usage(str(path)).free
+ 
++
+ def format_size(size: int) -> str:
+-    """Format size in bytes to human readable format."""
++    """Format size in bytes to human-readable format."""
+     for unit in ['B', 'KB', 'MB', 'GB']:
+         if size < 1024:
+             return f"{size:.1f} {unit}"
+         size /= 1024
+     return f"{size:.1f} TB"
+ 
++
+ def get_file_info(path: str) -> Optional[Dict]:
+     """Get file information.
+     
+@@ -28,7 +32,7 @@ def get_file_info(path: str) -> Optional[Dict]:
+         file_path = Path(path)
+         if not file_path.exists():
+             return None
+-            
++
+         stats = file_path.stat()
+         return {
+             'size': stats.st_size,
+@@ -37,4 +41,4 @@ def get_file_info(path: str) -> Optional[Dict]:
+             'is_dir': file_path.is_dir()
+         }
+     except Exception:
+-        return None 
+\ No newline at end of file
++        return None
+diff --git a/src/utils/logger.py b/src/utils/logger.py
+index 50c1182..b526c13 100644
+--- a/src/utils/logger.py
++++ b/src/utils/logger.py
+@@ -4,13 +4,14 @@ import json
+ import logging
+ import sys
+ from datetime import datetime
+-from pathlib import Path
+ from logging.handlers import RotatingFileHandler
++from pathlib import Path
+ from typing import Any, Dict
+ 
++
+ class JsonFormatter(logging.Formatter):
+     """Custom formatter that outputs logs in JSON format."""
+-    
++
+     def format(self, record: logging.LogRecord) -> str:
+         """Format the log record as JSON."""
+         log_data = {
+@@ -19,11 +20,11 @@ class JsonFormatter(logging.Formatter):
+             'message': record.getMessage(),
+             'logger': record.name
+         }
+-        
++
+         # Add extra fields if they exist
+         if hasattr(record, 'extra'):
+             log_data.update(record.extra)
+-        
++
+         # Add exception info if present
+         if record.exc_info:
+             log_data['exception'] = {
+@@ -31,25 +32,26 @@ class JsonFormatter(logging.Formatter):
+                 'message': str(record.exc_info[1]),
+                 'traceback': self.formatException(record.exc_info)
+             }
+-            
++
+         return json.dumps(log_data)
+ 
++
+ class HealthCheckHandler(logging.Handler):
+     """Handler that monitors logging health and system status."""
+-    
++
+     def __init__(self, health_file: Path):
+         super().__init__()
+         self.health_file = health_file
+         self.error_count = 0
+         self.last_error_time = None
+-        
++
+     def emit(self, record: logging.LogRecord) -> None:
+         """Update health metrics when a log is emitted."""
+         if record.levelno >= logging.ERROR:
+             self.error_count += 1
+             self.last_error_time = datetime.now()
+             self._update_health_file()
+-    
++
+     def _update_health_file(self) -> None:
+         """Update the health check file with current status."""
+         health_data = {
+@@ -58,27 +60,28 @@ class HealthCheckHandler(logging.Handler):
+             'last_error': self.last_error_time.isoformat() if self.last_error_time else None,
+             'status': 'degraded' if self.error_count > 0 else 'healthy'
+         }
+-        
++
+         with self.health_file.open('w', encoding='utf-8') as f:
+             json.dump(health_data, f, indent=2)
+ 
++
+ def setup_logger(log_dir: Path = None) -> logging.Logger:
+     """Setup application logger with JSON formatting and health monitoring."""
+     logger = logging.getLogger('backup_tool')
+     logger.setLevel(logging.INFO)
+-    
++
+     # Remove existing handlers
+     logger.handlers.clear()
+-    
++
+     # Console handler with simple formatting
+     console_handler = logging.StreamHandler(sys.stdout)
+     console_handler.setLevel(logging.INFO)
+     console_handler.setFormatter(logging.Formatter('%(message)s'))
+     logger.addHandler(console_handler)
+-    
++
+     if log_dir:
+         log_dir.mkdir(parents=True, exist_ok=True)
+-        
++
+         # JSON file handler
+         json_handler = RotatingFileHandler(
+             log_dir / 'backup.json',
+@@ -89,15 +92,16 @@ def setup_logger(log_dir: Path = None) -> logging.Logger:
+         json_handler.setLevel(logging.DEBUG)
+         json_handler.setFormatter(JsonFormatter())
+         logger.addHandler(json_handler)
+-        
++
+         # Health check handler
+         health_handler = HealthCheckHandler(log_dir / 'health.json')
+         health_handler.setLevel(logging.ERROR)
+         logger.addHandler(health_handler)
+-    
++
+     return logger
+ 
++
+ def log_with_context(logger: logging.Logger, level: int, message: str, context: Dict[str, Any] = None) -> None:
+     """Log a message with additional context in JSON format."""
+     extra = {'extra': context} if context else {}
+-    logger.log(level, message, extra=extra) 
+\ No newline at end of file
++    logger.log(level, message, extra=extra)
+diff --git a/src/utils/memory_manager.py b/src/utils/memory_manager.py
+index 061854d..9258c4d 100644
+--- a/src/utils/memory_manager.py
++++ b/src/utils/memory_manager.py
+@@ -1,13 +1,15 @@
+-import logging
+ import gc
+-import psutil
++import logging
+ import os
+-from typing import Optional, Dict, Any
+-from threading import Lock
+ import time
++from threading import Lock
++from typing import Optional, Dict, Any
++
++import psutil
+ 
+ logger = logging.getLogger(__name__)
+ 
++
+ class MemoryManager:
+     """Manages memory usage across the application.
+     
+@@ -17,19 +19,19 @@ class MemoryManager:
+     - Cache management
+     - Memory limits enforcement
+     """
+-    
++
+     # Memory thresholds (in bytes)
+     DEFAULT_MEMORY_LIMIT = 1024 * 1024 * 1024  # 1GB
+     WARNING_THRESHOLD = 0.8  # 80% of limit
+     CRITICAL_THRESHOLD = 0.9  # 90% of limit
+-    
++
+     # Cache settings
+     DEFAULT_CACHE_SIZE = 10000
+     CACHE_CLEANUP_RATIO = 0.2  # Remove 20% when cleaning
+-    
++
+     # GC settings
+     GC_CHECK_INTERVAL = 60  # Check every 60 seconds
+-    
++
+     def __init__(self, memory_limit: Optional[int] = None):
+         """Initialize memory manager.
+         
+@@ -41,11 +43,11 @@ class MemoryManager:
+         self._caches: Dict[str, Dict] = {}
+         self._last_gc_time = time.time()
+         self._process = psutil.Process(os.getpid())
+-        
++
+         # Enable automatic garbage collection
+         gc.enable()
+         logger.info(f"Memory manager initialized with {self.memory_limit / 1024 / 1024:.1f}MB limit")
+-        
++
+     def register_cache(self, name: str, cache_dict: Dict, max_size: Optional[int] = None):
+         """Register a cache for management.
+         
+@@ -60,7 +62,7 @@ class MemoryManager:
+                 'max_size': max_size or self.DEFAULT_CACHE_SIZE
+             }
+         logger.debug(f"Registered cache '{name}' with max size {max_size or self.DEFAULT_CACHE_SIZE}")
+-        
++
+     def unregister_cache(self, name: str):
+         """Unregister a cache.
+         
+@@ -71,7 +73,7 @@ class MemoryManager:
+             if name in self._caches:
+                 del self._caches[name]
+                 logger.debug(f"Unregistered cache '{name}'")
+-                
++
+     def get_memory_usage(self) -> Dict[str, Any]:
+         """Get current memory usage statistics.
+         
+@@ -85,11 +87,11 @@ class MemoryManager:
+             'percent': usage.rss / self.memory_limit * 100,
+             'limit': self.memory_limit,
+             'cache_sizes': {
+-                name: len(cache['dict']) 
++                name: len(cache['dict'])
+                 for name, cache in self._caches.items()
+             }
+         }
+-        
++
+     def check_memory(self) -> bool:
+         """Check memory usage and perform cleanup if needed.
+         
+@@ -99,19 +101,19 @@ class MemoryManager:
+         with self._lock:
+             current_usage = self._process.memory_info().rss
+             usage_ratio = current_usage / self.memory_limit
+-            
++
+             # Log memory usage at debug level
+             logger.debug(
+                 f"Memory usage: {current_usage / 1024 / 1024:.1f}MB "
+                 f"({usage_ratio * 100:.1f}% of limit)"
+             )
+-            
++
+             # Check if it's time for garbage collection
+             current_time = time.time()
+             if current_time - self._last_gc_time > self.GC_CHECK_INTERVAL:
+                 self._force_garbage_collection()
+                 self._last_gc_time = current_time
+-            
++
+             # If usage is above warning threshold, clean caches
+             if usage_ratio > self.WARNING_THRESHOLD:
+                 logger.warning(
+@@ -119,7 +121,7 @@ class MemoryManager:
+                     f"({usage_ratio * 100:.1f}% of limit)"
+                 )
+                 self._clean_all_caches()
+-                
++
+             # If still above critical threshold after cleanup
+             if usage_ratio > self.CRITICAL_THRESHOLD:
+                 logger.error(
+@@ -127,14 +129,14 @@ class MemoryManager:
+                     f"({usage_ratio * 100:.1f}% of limit)"
+                 )
+                 return False
+-                
++
+             return True
+-            
++
+     def _force_garbage_collection(self):
+         """Force garbage collection."""
+         collected = gc.collect()
+         logger.debug(f"Garbage collection: {collected} objects collected")
+-        
++
+     def _clean_cache(self, cache_dict: Dict, max_size: int):
+         """Clean a single cache if it exceeds maximum size.
+         
+@@ -143,12 +145,12 @@ class MemoryManager:
+             max_size: Maximum allowed size
+         """
+         if len(cache_dict) > max_size:
+-            # Remove oldest entries (assuming they're least likely to be used)
++            # Remove the oldest entries (assuming they're least likely to be used)
+             remove_count = int(max_size * self.CACHE_CLEANUP_RATIO)
+             for _ in range(remove_count):
+                 if cache_dict:
+                     cache_dict.popitem()
+-                    
++
+     def _clean_all_caches(self):
+         """Clean all registered caches."""
+         with self._lock:
+@@ -163,7 +165,7 @@ class MemoryManager:
+                         f"Cleaned cache '{name}': {initial_size - final_size} "
+                         f"items removed"
+                     )
+-                    
++
+     def clear_all_caches(self):
+         """Clear all registered caches completely."""
+         with self._lock:
+@@ -171,4 +173,4 @@ class MemoryManager:
+                 cache_dict = cache_info['dict']
+                 size = len(cache_dict)
+                 cache_dict.clear()
+-                logger.info(f"Cleared cache '{name}': {size} items removed") 
+\ No newline at end of file
++                logger.info(f"Cleared cache '{name}': {size} items removed")
+diff --git a/src/utils/recovery.py b/src/utils/recovery.py
+index d8c79b8..8d58d9b 100644
+--- a/src/utils/recovery.py
++++ b/src/utils/recovery.py
+@@ -9,11 +9,13 @@ import threading
+ from datetime import datetime
+ from pathlib import Path
+ from typing import Dict, Any, Optional, Callable
++
+ import psutil
+ 
++
+ class SystemHealthMonitor:
+     """Monitors system health and resources."""
+-    
++
+     def __init__(self, thresholds: Dict[str, float]):
+         self.thresholds = {
+             'cpu_percent': thresholds.get('cpu_percent', 90.0),
+@@ -21,13 +23,13 @@ class SystemHealthMonitor:
+             'disk_percent': thresholds.get('disk_percent', 90.0)
+         }
+         self.logger = logging.getLogger('backup_tool.health_monitor')
+-    
++
+     def check_system_health(self) -> Dict[str, Any]:
+         """Check current system health metrics."""
+         cpu_percent = psutil.cpu_percent(interval=1)
+         memory = psutil.virtual_memory()
+         disk = psutil.disk_usage('/')
+-        
++
+         status = {
+             'timestamp': datetime.now().isoformat(),
+             'cpu_percent': cpu_percent,
+@@ -36,52 +38,53 @@ class SystemHealthMonitor:
+             'is_healthy': True,
+             'warnings': []
+         }
+-        
++
+         # Check thresholds
+         if cpu_percent > self.thresholds['cpu_percent']:
+             status['warnings'].append(f'High CPU usage: {cpu_percent}%')
+             status['is_healthy'] = False
+-            
++
+         if memory.percent > self.thresholds['memory_percent']:
+             status['warnings'].append(f'High memory usage: {memory.percent}%')
+             status['is_healthy'] = False
+-            
++
+         if disk.percent > self.thresholds['disk_percent']:
+             status['warnings'].append(f'High disk usage: {disk.percent}%')
+             status['is_healthy'] = False
+-        
++
+         return status
+ 
++
+ class CrashRecovery:
+     """Handles crash recovery and backup state restoration."""
+-    
++
+     def __init__(self, backup_dir: Path):
+         self.backup_dir = backup_dir
+         self.state_file = backup_dir / '.backup_state.json'
+         self.pid_file = backup_dir / '.backup.pid'
+         self.logger = logging.getLogger('backup_tool.crash_recovery')
+-        
++
+     def save_state(self, state: Dict[str, Any]) -> None:
+         """Save current backup state to file."""
+         state['timestamp'] = datetime.now().isoformat()
+         state['pid'] = os.getpid()
+-        
++
+         with self.state_file.open('w', encoding='utf-8') as f:
+             json.dump(state, f, indent=2)
+-            
++
+         # Update PID file
+         with self.pid_file.open('w') as f:
+             f.write(str(os.getpid()))
+-    
++
+     def load_state(self) -> Optional[Dict[str, Any]]:
+         """Load previous backup state if exists."""
+         if not self.state_file.exists():
+             return None
+-            
++
+         try:
+             with self.state_file.open('r', encoding='utf-8') as f:
+                 state = json.load(f)
+-                
++
+             # Check if previous process is still running
+             if self.pid_file.exists():
+                 with self.pid_file.open('r') as f:
+@@ -89,12 +92,12 @@ class CrashRecovery:
+                     if psutil.pid_exists(pid):
+                         self.logger.warning(f'Previous backup process (PID: {pid}) is still running')
+                         return None
+-            
++
+             return state
+         except (json.JSONDecodeError, ValueError) as e:
+             self.logger.error(f'Failed to load backup state: {e}')
+             return None
+-    
++
+     def cleanup_state(self) -> None:
+         """Clean up state files."""
+         if self.state_file.exists():
+@@ -102,9 +105,10 @@ class CrashRecovery:
+         if self.pid_file.exists():
+             self.pid_file.unlink()
+ 
++
+ class AutomaticRecovery:
+     """Implements automatic recovery mechanisms."""
+-    
++
+     def __init__(self, backup_dir: Path, health_check_interval: int = 60):
+         self.backup_dir = backup_dir
+         self.health_check_interval = health_check_interval
+@@ -113,9 +117,10 @@ class AutomaticRecovery:
+         self.logger = logging.getLogger('backup_tool.auto_recovery')
+         self._stop_event = threading.Event()
+         self._monitor_thread = None
+-        
++
+     def start_monitoring(self, on_health_warning: Callable[[str], None]) -> None:
+         """Start health monitoring in a separate thread."""
++
+         def monitor_health():
+             while not self._stop_event.is_set():
+                 try:
+@@ -127,23 +132,24 @@ class AutomaticRecovery:
+                     self.logger.error(f'Health check failed: {e}')
+                 finally:
+                     self._stop_event.wait(self.health_check_interval)
+-        
++
+         self._monitor_thread = threading.Thread(target=monitor_health, daemon=True)
+         self._monitor_thread.start()
+-    
++
+     def stop_monitoring(self) -> None:
+         """Stop health monitoring."""
+         if self._monitor_thread:
+             self._stop_event.set()
+             self._monitor_thread.join()
+-    
++
+     def setup_signal_handlers(self) -> None:
+         """Setup signal handlers for graceful shutdown."""
++
+         def signal_handler(signum, frame):
+             self.logger.info(f'Received signal {signum}, performing cleanup...')
+             self.stop_monitoring()
+             self.crash_recovery.cleanup_state()
+             sys.exit(0)
+-        
++
+         signal.signal(signal.SIGINT, signal_handler)
+-        signal.signal(signal.SIGTERM, signal_handler) 
+\ No newline at end of file
++        signal.signal(signal.SIGTERM, signal_handler)
+diff --git a/src/utils/update_checker.py b/src/utils/update_checker.py
+index 335ce7e..837c59c 100644
+--- a/src/utils/update_checker.py
++++ b/src/utils/update_checker.py
+@@ -1,14 +1,15 @@
+ """Module for checking application updates."""
+-import subprocess
+ import logging
++import subprocess
+ from pathlib import Path
+ from typing import Tuple, Optional
+ 
+ logger = logging.getLogger(__name__)
+ 
++
+ class UpdateChecker:
+     """Checks for application updates using git."""
+-    
++
+     def __init__(self, app_dir: Path = None):
+         """Initialize update checker.
+         
+@@ -17,7 +18,7 @@ class UpdateChecker:
+         """
+         self.app_dir = app_dir or Path.cwd()
+         self._git_available = self._check_git_available()
+-        
++
+     def _check_git_available(self) -> bool:
+         """Check if git is available in the system.
+         
+@@ -26,15 +27,15 @@ class UpdateChecker:
+         """
+         try:
+             subprocess.run(
+-                ['git', '--version'], 
+-                capture_output=True, 
++                ['git', '--version'],
++                capture_output=True,
+                 check=True
+             )
+             return True
+         except (subprocess.SubprocessError, FileNotFoundError):
+             logger.warning("Git is not available in the system")
+             return False
+-            
++
+     def _get_current_version(self) -> Optional[str]:
+         """Get current version from git.
+         
+@@ -43,7 +44,7 @@ class UpdateChecker:
+         """
+         if not self._git_available:
+             return None
+-            
++
+         try:
+             result = subprocess.run(
+                 ['git', 'rev-parse', 'HEAD'],
+@@ -56,7 +57,7 @@ class UpdateChecker:
+         except subprocess.SubprocessError as e:
+             logger.error(f"Failed to get current version: {e}")
+             return None
+-            
++
+     def _get_remote_version(self) -> Optional[str]:
+         """Get latest version from remote repository.
+         
+@@ -65,7 +66,7 @@ class UpdateChecker:
+         """
+         if not self._git_available:
+             return None
+-            
++
+         try:
+             # Fetch updates from remote
+             subprocess.run(
+@@ -74,7 +75,7 @@ class UpdateChecker:
+                 capture_output=True,
+                 check=True
+             )
+-            
++
+             # Get remote HEAD hash
+             result = subprocess.run(
+                 ['git', 'rev-parse', 'origin/main'],
+@@ -87,7 +88,7 @@ class UpdateChecker:
+         except subprocess.SubprocessError as e:
+             logger.error(f"Failed to get remote version: {e}")
+             return None
+-            
++
+     def check_for_updates(self) -> Tuple[bool, str]:
+         """Check if updates are available.
+         
+@@ -98,16 +99,16 @@ class UpdateChecker:
+         """
+         if not self._git_available:
+             return False, "Git is not available - cannot check for updates"
+-            
++
+         current = self._get_current_version()
+         if not current:
+             return False, "Failed to get current version"
+-            
++
+         remote = self._get_remote_version()
+         if not remote:
+             return False, "Failed to check remote version"
+-            
++
+         if current != remote:
+             return True, f"Update available: {current[:7]} → {remote[:7]}"
+-            
+-        return False, "Application is up to date" 
+\ No newline at end of file
++
++        return False, "Application is up to date"
+diff --git a/tools/convert_icons.py b/tools/convert_icons.py
+index 3c2a226..7324d36 100644
+--- a/tools/convert_icons.py
++++ b/tools/convert_icons.py
+@@ -1,34 +1,37 @@
+ import os
+ from pathlib import Path
++
+ import cairosvg
+-import re
++
+ 
+ def ensure_dir(path):
+     Path(path).mkdir(parents=True, exist_ok=True)
+ 
++
+ def modify_svg_content(svg_content, color):
+     """Modify SVG content to use specific color"""
+     # Usuń currentColor i zastąp konkretnym kolorem
+     content = svg_content.replace('fill="currentColor"', f'fill="{color}"')
+     return content
+ 
++
+ def convert_svg_to_png(svg_path, png_path, width, height, color=None):
+     """Convert SVG file to PNG with specified dimensions and color"""
+     # Ensure output directory exists
+     ensure_dir(os.path.dirname(png_path))
+-    
++
+     # Read SVG content
+     with open(svg_path, 'r') as f:
+         svg_content = f.read()
+-    
++
+     if color:
+         svg_content = modify_svg_content(svg_content, color)
+-    
++
+     # Create temporary file with modified SVG
+     temp_svg = svg_path.replace('.svg', '_temp.svg')
+     with open(temp_svg, 'w') as f:
+         f.write(svg_content)
+-    
++
+     try:
+         # Convert to PNG
+         cairosvg.svg2png(
+@@ -43,12 +46,13 @@ def convert_svg_to_png(svg_path, png_path, width, height, color=None):
+         if os.path.exists(temp_svg):
+             os.remove(temp_svg)
+ 
++
+ if __name__ == '__main__':
+     # Define paths
+     resources_dir = Path('src/resources/images')
+     trays_dir = resources_dir / 'trays'
+     ensure_dir(trays_dir)
+-    
++
+     # Convert main icon - morski niebieski
+     convert_svg_to_png(
+         str(resources_dir / 'hard-drive-3-fill.svg'),
+@@ -57,22 +61,22 @@ if __name__ == '__main__':
+         256,
+         color='#00ACC1'  # Morski niebieski
+     )
+-    
++
+     # Convert tray icons with specific colors
+     icon_mapping = {
+         # Stan aktywny - jasny zielony
+         ('refresh-fill.svg', 'backup', '#4CAF50'),
+-        
++
+         # Błąd - czerwony
+         ('error-warning-fill.svg', 'error', '#FF5252'),
+-        
++
+         # Ostrzeżenie - pomarańczowy
+         ('alert-fill.svg', 'warning', '#FFA726'),
+-        
++
+         # Oczekiwanie - fioletowy
+         ('box-3-fill.svg', 'waiting', '#7E57C2')
+     }
+-    
++
+     for source, name, color in icon_mapping:
+         convert_svg_to_png(
+             str(resources_dir / source),
+@@ -80,4 +84,4 @@ if __name__ == '__main__':
+             24,
+             24,
+             color=color
+-        ) 
+\ No newline at end of file
++        )

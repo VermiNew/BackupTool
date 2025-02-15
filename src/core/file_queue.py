@@ -1,20 +1,20 @@
+import heapq
 import logging
-from pathlib import Path
-from typing import List, Dict, Optional
+import time
 from dataclasses import dataclass
 from enum import Enum
-import heapq
-import time
+from pathlib import Path
+from typing import List, Dict, Optional
 
 logger = logging.getLogger(__name__)
 
 
 class OperationType(Enum):
     """Types of file operations with their base priorities."""
-    DELETE = 100        # Highest priority - free up space first
-    MOVE = 80           # Then handle moves
-    UPDATE = 60         # Then update existing files
-    COPY = 40           # Finally copy new files
+    DELETE = 100  # Highest priority - free up space first
+    MOVE = 80  # Then handle moves
+    UPDATE = 60  # Then update existing files
+    COPY = 40  # Finally copy new files
 
 
 @dataclass
@@ -47,23 +47,23 @@ class FileQueue:
     """
 
     # Size thresholds (in bytes)
-    SMALL_FILE_THRESHOLD = 10 * 1024 * 1024     # 10 MB
-    LARGE_FILE_THRESHOLD = 100 * 1024 * 1024    # 100 MB
+    SMALL_FILE_THRESHOLD = 10 * 1024 * 1024  # 10 MB
+    LARGE_FILE_THRESHOLD = 100 * 1024 * 1024  # 100 MB
 
     # Priority modifiers
-    SMALL_FILE_BONUS = 20       # Bonus for small files
-    LARGE_FILE_PENALTY = 10     # Penalty for large files
-    DEPTH_PENALTY = 5           # Penalty per directory level
+    SMALL_FILE_BONUS = 20  # Bonus for small files
+    LARGE_FILE_PENALTY = 10  # Penalty for large files
+    DEPTH_PENALTY = 5  # Penalty per directory level
 
     # Speed calculation constants
-    SPEED_WINDOW_SIZE = 20          # Number of samples for speed calculation
-    SPEED_UPDATE_INTERVAL = 1.0     # Update speed every second
-    ETA_SMOOTHING_FACTOR = 0.2      # ETA smoothing factor (0-1)
-    
+    SPEED_WINDOW_SIZE = 20  # Number of samples for speed calculation
+    SPEED_UPDATE_INTERVAL = 1.0  # Update speed every second
+    ETA_SMOOTHING_FACTOR = 0.2  # ETA smoothing factor (0-1)
+
     # Memory management constants
-    MAX_COMPLETED_ITEMS = 1000          # Maximum number of completed items to keep
+    MAX_COMPLETED_ITEMS = 1000  # Maximum number of completed items to keep
     COMPLETED_CLEANUP_THRESHOLD = 1200  # When to trigger cleanup
-    MAX_SPEED_SAMPLES = 100             # Maximum number of speed samples to keep
+    MAX_SPEED_SAMPLES = 100  # Maximum number of speed samples to keep
 
     def __init__(self):
         """Initialize the file queue."""
@@ -233,7 +233,7 @@ class FileQueue:
 
         logger.debug(
             f"Priority calculated for {path}: {priority:.2f} "
-            f"(size: {size/1024/1024:.1f}MB, depth: {depth})"
+            f"(size: {size / 1024 / 1024:.1f}MB, depth: {depth})"
         )
 
         return priority
@@ -289,7 +289,7 @@ class FileQueue:
 
             logger.debug(
                 f"Added operation: {op_type.name} {path} "
-                f"(size: {size/1024/1024:.1f}MB, priority: {priority:.2f})"
+                f"(size: {size / 1024 / 1024:.1f}MB, priority: {priority:.2f})"
             )
 
         except Exception as e:
@@ -303,7 +303,7 @@ class FileQueue:
             Next FileOperation to process, or None if queue is empty
         """
         while self.queue:
-            # Get highest priority operation
+            # Get the highest priority operation
             operation = heapq.heappop(self.queue)
 
             # Check if all dependencies are completed

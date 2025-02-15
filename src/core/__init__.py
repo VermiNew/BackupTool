@@ -1,1 +1,1 @@
-"""Core functionality for the Backup Tool.""" 
+"""Core functionality for the Backup Tool."""

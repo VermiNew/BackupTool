@@ -1,8 +1,8 @@
+import fnmatch
+import logging
 import re
 from pathlib import Path
 from typing import List, Dict, Union, Optional
-import fnmatch
-import logging
 
 logger = logging.getLogger(__name__)
 
@@ -53,7 +53,7 @@ class ExclusionRules:
         logger.debug(f"Added exclusion pattern: {pattern}")
 
     def add_size_limit(
-        self, min_size: Optional[int] = None, max_size: Optional[int] = None
+            self, min_size: Optional[int] = None, max_size: Optional[int] = None
     ):
         """Set size limits for file exclusion.
 

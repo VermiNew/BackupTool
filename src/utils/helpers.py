@@ -1,19 +1,23 @@
-import psutil
+from datetime import datetime
 from pathlib import Path
 from typing import Dict, Optional
-from datetime import datetime
+
+import psutil
+
 
 def get_free_space(path: Path) -> int:
     """Get free space in bytes for the given path."""
     return psutil.disk_usage(str(path)).free
 
+
 def format_size(size: int) -> str:
-    """Format size in bytes to human readable format."""
+    """Format size in bytes to human-readable format."""
     for unit in ['B', 'KB', 'MB', 'GB']:
         if size < 1024:
             return f"{size:.1f} {unit}"
         size /= 1024
     return f"{size:.1f} TB"
+
 
 def get_file_info(path: str) -> Optional[Dict]:
     """Get file information.
@@ -28,7 +32,7 @@ def get_file_info(path: str) -> Optional[Dict]:
         file_path = Path(path)
         if not file_path.exists():
             return None
-            
+
         stats = file_path.stat()
         return {
             'size': stats.st_size,
@@ -37,4 +41,4 @@ def get_file_info(path: str) -> Optional[Dict]:
             'is_dir': file_path.is_dir()
         }
     except Exception:
-        return None 
+        return None

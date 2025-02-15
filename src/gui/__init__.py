@@ -1,1 +1,1 @@
-"""GUI components for the Backup Tool.""" 
+"""GUI components for the Backup Tool."""

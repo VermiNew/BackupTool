@@ -39,6 +39,7 @@ DEFAULT_CONFIG = {
     }
 }
 
+
 def deep_merge(default: Dict, user: Dict) -> Dict:
     """Deep merge two dictionaries.
     
@@ -57,6 +58,7 @@ def deep_merge(default: Dict, user: Dict) -> Dict:
             result[key] = value
     return result
 
+
 def load_config() -> Tuple[Dict, str]:
     """Load configuration from file or create default.
     
@@ -66,7 +68,7 @@ def load_config() -> Tuple[Dict, str]:
             - config_path: Path to the configuration file
     """
     config_path = Path('config.json')
-    
+
     try:
         if config_path.exists():
             with config_path.open('r') as f:
@@ -78,7 +80,7 @@ def load_config() -> Tuple[Dict, str]:
             with config_path.open('w') as f:
                 json.dump(DEFAULT_CONFIG, f, indent=4)
             return DEFAULT_CONFIG, str(config_path.absolute())
-            
+
     except Exception as e:
         print(f"Error loading config: {e}")
-        return DEFAULT_CONFIG, str(config_path.absolute()) 
+        return DEFAULT_CONFIG, str(config_path.absolute())

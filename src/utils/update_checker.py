@@ -1,14 +1,15 @@
 """Module for checking application updates."""
-import subprocess
 import logging
+import subprocess
 from pathlib import Path
 from typing import Tuple, Optional
 
 logger = logging.getLogger(__name__)
 
+
 class UpdateChecker:
     """Checks for application updates using git."""
-    
+
     def __init__(self, app_dir: Path = None):
         """Initialize update checker.
         
@@ -17,7 +18,7 @@ class UpdateChecker:
         """
         self.app_dir = app_dir or Path.cwd()
         self._git_available = self._check_git_available()
-        
+
     def _check_git_available(self) -> bool:
         """Check if git is available in the system.
         
@@ -26,15 +27,15 @@ class UpdateChecker:
         """
         try:
             subprocess.run(
-                ['git', '--version'], 
-                capture_output=True, 
+                ['git', '--version'],
+                capture_output=True,
                 check=True
             )
             return True
         except (subprocess.SubprocessError, FileNotFoundError):
             logger.warning("Git is not available in the system")
             return False
-            
+
     def _get_current_version(self) -> Optional[str]:
         """Get current version from git.
         
@@ -43,7 +44,7 @@ class UpdateChecker:
         """
         if not self._git_available:
             return None
-            
+
         try:
             result = subprocess.run(
                 ['git', 'rev-parse', 'HEAD'],
@@ -56,7 +57,7 @@ class UpdateChecker:
         except subprocess.SubprocessError as e:
             logger.error(f"Failed to get current version: {e}")
             return None
-            
+
     def _get_remote_version(self) -> Optional[str]:
         """Get latest version from remote repository.
         
@@ -65,7 +66,7 @@ class UpdateChecker:
         """
         if not self._git_available:
             return None
-            
+
         try:
             # Fetch updates from remote
             subprocess.run(
@@ -74,7 +75,7 @@ class UpdateChecker:
                 capture_output=True,
                 check=True
             )
-            
+
             # Get remote HEAD hash
             result = subprocess.run(
                 ['git', 'rev-parse', 'origin/main'],
@@ -87,7 +88,7 @@ class UpdateChecker:
         except subprocess.SubprocessError as e:
             logger.error(f"Failed to get remote version: {e}")
             return None
-            
+
     def check_for_updates(self) -> Tuple[bool, str]:
         """Check if updates are available.
         
@@ -98,16 +99,16 @@ class UpdateChecker:
         """
         if not self._git_available:
             return False, "Git is not available - cannot check for updates"
-            
+
         current = self._get_current_version()
         if not current:
             return False, "Failed to get current version"
-            
+
         remote = self._get_remote_version()
         if not remote:
             return False, "Failed to check remote version"
-            
+
         if current != remote:
             return True, f"Update available: {current[:7]} → {remote[:7]}"
-            
-        return False, "Application is up to date" 
+
+        return False, "Application is up to date"
